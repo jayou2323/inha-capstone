@@ -125,8 +125,7 @@ export default function MenuScreen({
       (sum, item) => sum + item.price * item.quantity,
       0
     );
-    console.log("Checkout:", cartItems, totalPrice);
-    // onCheckout(cartItems, totalPrice);
+    onCheckout(cartItems, totalPrice);
   };
 
   return (
