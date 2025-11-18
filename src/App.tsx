@@ -33,7 +33,7 @@ export default function App() {
   };
 
   return (
-    <div className="w-[1280px] h-[720px] mx-auto bg-linaer-to-br from-slate-50 to-slate-100 overflow-hidden relative font-sans">
+    <div className="w-[1280px] h-[720px] bg-linear-to-br from-slate-50 to-slate-100 overflow-hidden relative font-sans">
       <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl" />
       <div className="absolute bottom-0 left-0 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl" />
 

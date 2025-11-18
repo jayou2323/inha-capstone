@@ -45,9 +45,9 @@ export default function Cart({
           ) : (
             <Store className="w-8 h-8 text-white" />
           )}
-          <h2 className="text-2xl font-bold text-white">주문 내역</h2>
+          <h2 className="text-xl font-bold text-white">주문 내역</h2>
         </div>
-        <p className="text-lg text-white/80">
+        <p className="text-base text-white/80">
           {orderType === "takeout" ? "포장 주문" : "매장 주문"}
         </p>
       </div>
@@ -63,7 +63,7 @@ export default function Cart({
               className="h-full flex flex-col items-center justify-center text-slate-400"
             >
               <ShoppingBag className="w-24 h-24 mb-4 opacity-30" />
-              <p className="text-xl">선택된 메뉴가 없습니다</p>
+              <p className="text-lg">선택된 메뉴가 없습니다</p>
             </motion.div>
           ) : (
             <motion.div layout className="space-y-4">

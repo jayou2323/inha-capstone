@@ -15,10 +15,10 @@ export default function StartScreen({ onSelect }: StartScreenProps) {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
       >
-        <h1 className="text-5xl font-bold text-slate-800 mb-4">
+        <h1 className="text-3xl font-bold text-slate-800 mb-4">
           주문을 시작하시려면
         </h1>
-        <p className="text-2xl text-slate-600">화면을 터치해주세요</p>
+        <p className="text-xl text-slate-600">화면을 터치해주세요</p>
       </motion.div>
 
       {/* 선택 버튼 */}
@@ -42,8 +42,7 @@ export default function StartScreen({ onSelect }: StartScreenProps) {
               />
             </div>
 
-            <h2 className="text-3xl font-semibold text-slate-800 mb-3">포장</h2>
-            <p className="text-xl text-slate-500 text-center">테이크아웃</p>
+            <h2 className="text-2xl font-semibold text-slate-800 mb-3">포장</h2>
           </div>
         </motion.button>
 
@@ -63,8 +62,7 @@ export default function StartScreen({ onSelect }: StartScreenProps) {
               <Store className="w-16 h-16 text-purple-600" strokeWidth={1.5} />
             </div>
 
-            <h2 className="text-3xl font-semibold text-slate-800 mb-3">매장</h2>
-            <p className="text-xl text-slate-500 text-center">매장식사</p>
+            <h2 className="text-2xl font-semibold text-slate-800 mb-3">매장</h2>
           </div>
         </motion.button>
       </div>

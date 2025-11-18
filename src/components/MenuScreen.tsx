@@ -55,14 +55,14 @@ const MENU_DATA: MenuItemType[] = [
   },
   {
     id: "7",
-    name: "초코 케이크",
+    name: "케이크",
     price: 5500,
     image: "/images/cake.jpg",
     category: "dessert",
   },
   {
     id: "8",
-    name: "클럽 샌드위치",
+    name: "샌드위치",
     price: 6500,
     image: "/images/sandwich.jpg",
     category: "food",
