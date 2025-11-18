@@ -1,15 +1,25 @@
 @import "tailwindcss";
 
-html, body {
-  width: 1280px;
-  height: 720px;
+html,
+body {
+  width: 100vw;
+  height: 100vh;
   overflow: hidden;
   margin: 0;
   padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e2e8f0;
 }
 
 #root {
-  width: 1280px;
-  height: 720px;
+  width: 720px;
+  height: 1280px;
   overflow: hidden;
+  position: relative;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+  transform-origin: center center;
+  transform: scale(var(--scale, 1));
+  transition: transform 0.3s ease;
 }
