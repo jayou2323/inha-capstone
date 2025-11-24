@@ -8,16 +8,14 @@ interface PaymentScreenProps {
   orderType: OrderType;
   items: CartItem[];
   totalPrice: number;
-  onComplete: () => void;
+  onNfcTransfer: (includeReceipt: boolean) => void;
 }
-
-type ReceiptChoice = "yes" | "no";
 
 export default function PaymentScreen({
   orderType,
   items,
   totalPrice,
-  onComplete,
+  onNfcTransfer,
 }: PaymentScreenProps) {
   const [isPaymentComplete, setIsPaymentComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,22 +41,21 @@ export default function PaymentScreen({
   useEffect(() => {
     processPayment();
 
-    const timer = setTimeout(() => {
-      onComplete();
-    }, TIMINGS.AUTO_REDIRECT_MS);
-
+    // 자동 리다이렉트 시 번호표만 전송
+    const timer = setTimeout(
+      () => onNfcTransfer(false),
+      TIMINGS.AUTO_REDIRECT_MS
+    );
     return () => clearTimeout(timer);
-  }, [processPayment, onComplete]);
+  }, [processPayment, onNfcTransfer]);
 
-  const handleReceiptChoice = useCallback(
-    (choice: ReceiptChoice) => {
-      if (choice === "yes") {
-        alert("영수증이 발급되었습니다.");
-      }
-      onComplete();
-    },
-    [onComplete]
-  );
+  const handleTransferWithReceipt = useCallback(() => {
+    onNfcTransfer(true); // 번호표 + 영수증
+  }, [onNfcTransfer]);
+
+  const handleTransferTicketOnly = useCallback(() => {
+    onNfcTransfer(false); // 번호표만
+  }, [onNfcTransfer]);
 
   return (
     <div className="h-full flex items-center justify-center p-8">
@@ -98,14 +95,14 @@ export default function PaymentScreen({
 
             <div className="flex gap-3">
               <button
-                onClick={() => handleReceiptChoice("yes")}
+                onClick={handleTransferWithReceipt}
                 className="flex-1 bg-linear-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white py-4 rounded-xl transition-all duration-300 flex items-center justify-center text-lg font-bold"
               >
                 발급
               </button>
 
               <button
-                onClick={() => handleReceiptChoice("no")}
+                onClick={handleTransferTicketOnly}
                 className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 py-4 rounded-xl transition-all duration-300 flex items-center justify-center text-lg font-bold"
               >
                 미발급
@@ -113,7 +110,7 @@ export default function PaymentScreen({
             </div>
 
             <p className="text-center text-slate-400 mt-5 text-sm">
-              10초 후 자동으로 처음 화면으로 돌아갑니다.
+              10초 후 자동으로 화면이 전환됩니다.
             </p>
           </div>
         )}

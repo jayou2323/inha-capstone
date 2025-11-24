@@ -2,16 +2,18 @@ import { useState, useCallback } from "react";
 import StartScreen from "./components/StartScreen";
 import MenuScreen from "./components/MenuScreen";
 import PaymentScreen from "./components/PaymentScreen";
+import NfcTagScreen from "./components/NfcTagScreen";
+import NfcTagCompleteScreen from "./components/NfcTagComplete";
 import type { CartItem, OrderType, ScreenType } from "./types";
 
 export default function App() {
   const [screen, setScreen] = useState<ScreenType>("start");
   const [orderType, setOrderType] = useState<OrderType>("takeout");
-
   const [completedOrder, setCompletedOrder] = useState<{
     items: CartItem[];
     totalPrice: number;
   } | null>(null);
+  const [includeReceipt, setIncludeReceipt] = useState(false);
 
   const handleSelectOrderType = useCallback((type: OrderType) => {
     setOrderType(type);
@@ -19,6 +21,8 @@ export default function App() {
   }, []);
 
   const handleBackToStart = useCallback(() => {
+    setCompletedOrder(null);
+    setIncludeReceipt(false);
     setScreen("start");
   }, []);
 
@@ -30,10 +34,18 @@ export default function App() {
     []
   );
 
-  const handlePaymentComplete = useCallback(() => {
-    setCompletedOrder(null);
-    setScreen("start");
+  const handleNfcTransfer = useCallback((withReceipt: boolean) => {
+    setIncludeReceipt(withReceipt);
+    setScreen("nfcTag");
   }, []);
+
+  const handleNfcTagComplete = useCallback(() => {
+    setScreen("nfcComplete");
+  }, []);
+
+  const handleNfcComplete = useCallback(() => {
+    handleBackToStart();
+  }, [handleBackToStart]);
 
   return (
     <div className="w-[720px] h-[1280px] bg-linear-to-br from-slate-50 to-slate-100 overflow-hidden relative font-sans">
@@ -42,6 +54,7 @@ export default function App() {
 
       <div className="relative h-full">
         {screen === "start" && <StartScreen onSelect={handleSelectOrderType} />}
+
         {screen === "menu" && (
           <MenuScreen
             orderType={orderType}
@@ -49,13 +62,25 @@ export default function App() {
             onCheckout={handleCheckout}
           />
         )}
+
         {screen === "payment" && completedOrder && (
           <PaymentScreen
             orderType={orderType}
             items={completedOrder.items}
             totalPrice={completedOrder.totalPrice}
-            onComplete={handlePaymentComplete}
+            onNfcTransfer={handleNfcTransfer}
           />
+        )}
+
+        {screen === "nfcTag" && (
+          <NfcTagScreen
+            includeReceipt={includeReceipt}
+            onTagComplete={handleNfcTagComplete}
+          />
+        )}
+
+        {screen === "nfcComplete" && (
+          <NfcTagCompleteScreen onComplete={handleNfcComplete} />
         )}
       </div>
     </div>
