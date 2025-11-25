@@ -13,7 +13,6 @@ export default function App() {
     items: CartItem[];
     totalPrice: number;
   } | null>(null);
-  const [includeReceipt, setIncludeReceipt] = useState(false);
 
   const handleSelectOrderType = useCallback((type: OrderType) => {
     setOrderType(type);
@@ -22,7 +21,6 @@ export default function App() {
 
   const handleBackToStart = useCallback(() => {
     setCompletedOrder(null);
-    setIncludeReceipt(false);
     setScreen("start");
   }, []);
 
@@ -34,8 +32,7 @@ export default function App() {
     []
   );
 
-  const handleNfcTransfer = useCallback((withReceipt: boolean) => {
-    setIncludeReceipt(withReceipt);
+  const handleNfcTransfer = useCallback(() => {
     setScreen("nfcTag");
   }, []);
 
@@ -73,10 +70,7 @@ export default function App() {
         )}
 
         {screen === "nfcTag" && (
-          <NfcTagScreen
-            includeReceipt={includeReceipt}
-            onTagComplete={handleNfcTagComplete}
-          />
+          <NfcTagScreen onTagComplete={handleNfcTagComplete}/>
         )}
 
         {screen === "nfcComplete" && (

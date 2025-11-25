@@ -34,7 +34,7 @@ export default function NfcTagScreen({
         {/* 헤더 */}
         <div className="bg-linear-to-r from-blue-500 to-purple-500 p-8 text-center">
           <h1 className="text-2xl font-bold text-white mb-2">
-            번호표 전송중
+            영수증 전송중
           </h1>
           <p className="text-xl text-white/90">NFC로 데이터를 전송합니다</p>
         </div>
@@ -59,7 +59,7 @@ export default function NfcTagScreen({
               animate={NFC_ANIMATIONS.phoneFloat}
               transition={NFC_TRANSITIONS.phoneFloat}
             >
-              <div className="bg-linear-to-br from-indigo-500 to-blue-500 rounded-full p-8 shadow-xl">
+              <div className="bg-linear-to-br from-blue-500 to-purple-500 rounded-full p-8 shadow-xl">
                 <Smartphone
                   className="w-20 h-20 text-white"
                   strokeWidth={1.5}

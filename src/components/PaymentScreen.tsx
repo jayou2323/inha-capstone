@@ -8,7 +8,7 @@ interface PaymentScreenProps {
   orderType: OrderType;
   items: CartItem[];
   totalPrice: number;
-  onNfcTransfer: (includeReceipt: boolean) => void;
+  onNfcTransfer: () => void;
 }
 
 export default function PaymentScreen({
@@ -24,7 +24,6 @@ export default function PaymentScreen({
     setIsLoading(true);
     try {
       const result = await sendOrderData(items, totalPrice, orderType);
-
       if (result.success) {
         console.log("주문 데이터 전송 성공:", result.data);
       } else {
@@ -42,16 +41,9 @@ export default function PaymentScreen({
     processPayment();
 
     //자동 리다이렉트
-    const timer = setTimeout(
-      () => onNfcTransfer(true),
-      TIMINGS.AUTO_REDIRECT_MS
-    );
+    const timer = setTimeout(() => onNfcTransfer(), TIMINGS.AUTO_REDIRECT_MS);
     return () => clearTimeout(timer);
   }, [processPayment, onNfcTransfer]);
-
-  const handleTransferWithReceipt = useCallback(() => {
-    onNfcTransfer(true);
-  }, [onNfcTransfer]);
 
   return (
     <div className="h-full flex items-center justify-center p-8">
@@ -72,33 +64,24 @@ export default function PaymentScreen({
               <h1 className="text-2xl font-bold text-white mb-2">
                 결제가 완료되었습니다
               </h1>
-              <p className="text-xl text-white/90">
-                이용해 주셔서 감사합니다
-              </p>
+              <p className="text-xl text-white/90">이용해 주셔서 감사합니다</p>
             </>
           )}
         </div>
 
         {/* 영수증 선택 */}
         {!isLoading && isPaymentComplete && (
-          <div className="p-8">
-            <div className="text-center mb-6">
-              {/* <ReceiptText className="w-16 h-16 text-slate-400 mx-auto mb-4" /> */}
-              <h2 className="text-xl text-slate-900">
-                번호표를 발급합니다
-              </h2>
-            </div>
-
-            <div className="flex gap-3">
+          <div className="p-10">
+            <div className="flex gap-">
               <button
-                onClick={handleTransferWithReceipt}
+                onClick={onNfcTransfer}
                 className="flex-1 bg-linear-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white py-4 rounded-xl transition-all duration-300 flex items-center justify-center text-2xl font-bold"
               >
-                발급
+                영수증 발급받기
               </button>
             </div>
 
-            <p className="text-center text-slate-400 mt-5 text-sm">
+            <p className="text-center text-slate-400 mt-5 text-lg">
               10초 후 자동으로 화면이 전환됩니다.
             </p>
           </div>

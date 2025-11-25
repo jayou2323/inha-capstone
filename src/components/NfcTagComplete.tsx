@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { motion } from "framer-motion";
 import { CheckCircle } from "lucide-react";
 import {
@@ -14,11 +14,6 @@ interface NfcTagCompleteScreenProps {
 export default function NfcTagCompleteScreen({
   onComplete,
 }: NfcTagCompleteScreenProps) {
-  const timeoutSeconds = useMemo(
-    () => TIMINGS.NFC_COMPLETE_TIMEOUT_MS / 1000,
-    []
-  );
-
   useEffect(() => {
     const timer = setTimeout(onComplete, TIMINGS.NFC_COMPLETE_TIMEOUT_MS);
     return () => clearTimeout(timer);
@@ -26,6 +21,14 @@ export default function NfcTagCompleteScreen({
 
   return (
     <div className="h-full flex items-center justify-center p-12">
+      <svg width="0" height="0" style={{ position: "absolute" }}>
+        <defs>
+          <linearGradient id="gradient" x1="0" y1="0" x2="1" y2="1">
+            <stop stopColor="#3B82F6" offset="0" />
+            <stop stopColor="#A855F7" offset="1" />
+          </linearGradient>
+        </defs>
+      </svg>
       <motion.div
         {...ANIMATION_VARIANTS.scaleIn}
         transition={{ duration: 0.5 }}
@@ -36,8 +39,9 @@ export default function NfcTagCompleteScreen({
           transition={{ delay: 0.2, ...NFC_TRANSITIONS.spring }}
         >
           <CheckCircle
-            className="w-32 h-32 text-blue-500 mx-auto mb-8"
+            className="w-32 h-32 mx-auto mb-8"
             strokeWidth={1.5}
+            style={{ stroke: "url(#gradient)" }}
           />
         </motion.div>
 
@@ -54,7 +58,7 @@ export default function NfcTagCompleteScreen({
           transition={{ delay: 0.5, duration: 0.5 }}
           className="text-lg text-slate-400 mt-8"
         >
-          {timeoutSeconds}초 후 자동으로 처음 화면으로 돌아갑니다
+          3초 후 자동으로 처음 화면으로 돌아갑니다
         </motion.p>
       </motion.div>
     </div>
