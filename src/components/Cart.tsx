@@ -69,7 +69,7 @@ export default function Cart({
                   className="bg-slate-50 rounded-xl p-3 flex items-center"
                 >
                   <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-slate-800">
+                    <h3 className="text-xl font-semibold text-slate-800">
                       {item.name}
                     </h3>
                     <p className="text-md font-bold text-slate-500">

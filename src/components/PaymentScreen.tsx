@@ -41,42 +41,38 @@ export default function PaymentScreen({
   useEffect(() => {
     processPayment();
 
-    // 자동 리다이렉트 시 번호표만 전송
+    //자동 리다이렉트
     const timer = setTimeout(
-      () => onNfcTransfer(false),
+      () => onNfcTransfer(true),
       TIMINGS.AUTO_REDIRECT_MS
     );
     return () => clearTimeout(timer);
   }, [processPayment, onNfcTransfer]);
 
   const handleTransferWithReceipt = useCallback(() => {
-    onNfcTransfer(true); // 번호표 + 영수증
-  }, [onNfcTransfer]);
-
-  const handleTransferTicketOnly = useCallback(() => {
-    onNfcTransfer(false); // 번호표만
+    onNfcTransfer(true);
   }, [onNfcTransfer]);
 
   return (
     <div className="h-full flex items-center justify-center p-8">
-      <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden">
+      <div className="w-full max-w-xl bg-white rounded-3xl shadow-2xl overflow-hidden">
         {/* 결제 완료 헤더 */}
         <div className="bg-linear-to-r from-blue-500 to-purple-500 p-8 text-center">
           {isLoading ? (
             <>
               <Loader2 className="w-16 h-16 text-white mx-auto mb-3 animate-spin" />
-              <h1 className="text-xl font-bold text-white mb-2">
+              <h1 className="text-2xl font-bold text-white mb-2">
                 결제 처리중...
               </h1>
-              <p className="text-base text-white/90">잠시만 기다려주세요</p>
+              <p className="text-xl text-white/90">잠시만 기다려주세요</p>
             </>
           ) : (
             <>
               <CheckCircle className="w-16 h-16 text-white mx-auto mb-3" />
-              <h1 className="text-xl font-bold text-white mb-2">
+              <h1 className="text-2xl font-bold text-white mb-2">
                 결제가 완료되었습니다
               </h1>
-              <p className="text-base text-white/90">
+              <p className="text-xl text-white/90">
                 이용해 주셔서 감사합니다
               </p>
             </>
@@ -88,24 +84,17 @@ export default function PaymentScreen({
           <div className="p-8">
             <div className="text-center mb-6">
               {/* <ReceiptText className="w-16 h-16 text-slate-400 mx-auto mb-4" /> */}
-              <h2 className="text-lg text-slate-900">
-                영수증을 발급하시겠습니까?
+              <h2 className="text-xl text-slate-900">
+                번호표를 발급합니다
               </h2>
             </div>
 
             <div className="flex gap-3">
               <button
                 onClick={handleTransferWithReceipt}
-                className="flex-1 bg-linear-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white py-4 rounded-xl transition-all duration-300 flex items-center justify-center text-lg font-bold"
+                className="flex-1 bg-linear-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white py-4 rounded-xl transition-all duration-300 flex items-center justify-center text-2xl font-bold"
               >
                 발급
-              </button>
-
-              <button
-                onClick={handleTransferTicketOnly}
-                className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 py-4 rounded-xl transition-all duration-300 flex items-center justify-center text-lg font-bold"
-              >
-                미발급
               </button>
             </div>
 
