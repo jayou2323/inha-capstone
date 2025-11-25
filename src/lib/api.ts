@@ -1,9 +1,6 @@
 import axios from "axios";
 import type { CartItem } from "../types";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL;
-const API_ENDPOINT = `${BASE_URL}/create`;
-
 interface OrderPayload {
   store_name: string;
   payment_time: string;
@@ -40,7 +37,7 @@ export const sendOrderData = async (
 
   try {
     console.log("API Request:", payload);
-    const response = await axios.post(API_ENDPOINT, payload, {
+    const response = await axios.post("/api/create", payload, {
       headers: {
         "Content-Type": "application/json",
       },
