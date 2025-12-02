@@ -5,7 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:all": "concurrently \"npm run dev\" \"npm run dev:server\"",
+    "dev:server": "npm run dev --prefix server",
+    "dev:mock": "concurrently \"npm run dev\" \"npm run dev:mock --prefix server\"",
     "build": "tsc -b && vite build",
+    "build:all": "npm run build && npm run build:server",
+    "build:server": "npm run build --prefix server",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -23,6 +28,7 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.1.0",
+    "concurrently": "^8.2.2",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",

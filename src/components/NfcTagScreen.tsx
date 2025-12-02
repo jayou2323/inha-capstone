@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Smartphone } from "lucide-react";
 import {
@@ -7,22 +7,90 @@ import {
   NFC_TRANSITIONS,
   ANIMATION_VARIANTS,
 } from "../constants/animations";
+import { createNfcSession, getNfcSessionStatus } from "../lib/api";
 
 interface NfcTagScreenProps {
+  orderId: string;
   onTagComplete: () => void;
+  onTagFailed?: (error: string) => void;
 }
 
 const LOADING_DOTS_DELAYS = [0, 0.3, 0.6] as const;
 
 export default function NfcTagScreen({
+  orderId,
   onTagComplete,
+  onTagFailed,
 }: NfcTagScreenProps) {
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>("pending");
 
+  // 1. NFC 세션 생성
   useEffect(() => {
-    // 10초 후 태그 완료 화면으로 이동, 실제로는 NFC 태그 감지 시
-    const timer = setTimeout(onTagComplete, TIMINGS.NFC_TAG_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, [onTagComplete]);
+    const initSession = async () => {
+      console.log(`[NFC] Creating session for order: ${orderId}`);
+      const result = await createNfcSession(orderId);
+
+      if (result.success && result.sessionId) {
+        console.log(`[NFC] Session created: ${result.sessionId}`);
+        setSessionId(result.sessionId);
+      } else {
+        console.error("[NFC] Session creation failed");
+        onTagFailed?.("NFC 세션 생성 실패");
+      }
+    };
+    initSession();
+  }, [orderId, onTagFailed]);
+
+  // 2. 상태 폴링
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const pollInterval = setInterval(async () => {
+      const session = await getNfcSessionStatus(sessionId);
+
+      if (session) {
+        console.log(`[NFC] Status: ${session.status}`);
+        setStatus(session.status);
+
+        // 완료 상태 체크
+        if (session.status === "completed") {
+          clearInterval(pollInterval);
+          onTagComplete();
+        } else if (session.status === "failed" || session.status === "expired") {
+          clearInterval(pollInterval);
+          onTagFailed?.(session.message || "NFC 태깅 실패");
+        }
+      }
+    }, 500); // 500ms마다 폴링
+
+    // 타임아웃 백업
+    const timeout = setTimeout(() => {
+      clearInterval(pollInterval);
+      if (status !== "completed") {
+        onTagFailed?.("NFC 태깅 시간 초과");
+      }
+    }, TIMINGS.NFC_TAG_TIMEOUT_MS);
+
+    return () => {
+      clearInterval(pollInterval);
+      clearTimeout(timeout);
+    };
+  }, [sessionId, status, onTagComplete, onTagFailed]);
+
+  // 3. 상태별 메시지
+  const getStatusMessage = () => {
+    switch (status) {
+      case "pending":
+        return "NFC 준비 중...";
+      case "ready":
+        return "휴대폰을 태그해 주세요";
+      case "tagging":
+        return "데이터 전송 중...";
+      default:
+        return "휴대폰을 태그해 주세요";
+    }
+  };
 
   return (
     <div className="h-full flex items-center justify-center p-12">
@@ -69,7 +137,7 @@ export default function NfcTagScreen({
           </div>
 
           <h2 className="text-2xl font-bold text-slate-900 mb-4">
-            휴대폰을 태그해 주세요
+            {getStatusMessage()}
           </h2>
           <p className="text-lg text-slate-600 mb-2">
             키오스크 하단의 NFC 리더기에

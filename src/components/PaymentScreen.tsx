@@ -8,7 +8,7 @@ interface PaymentScreenProps {
   orderType: OrderType;
   items: CartItem[];
   totalPrice: number;
-  onNfcTransfer: () => void;
+  onNfcTransfer: (orderId: string) => void;
 }
 
 export default function PaymentScreen({
@@ -19,13 +19,15 @@ export default function PaymentScreen({
 }: PaymentScreenProps) {
   const [isPaymentComplete, setIsPaymentComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [orderId, setOrderId] = useState<string | null>(null);
 
   const processPayment = useCallback(async () => {
     setIsLoading(true);
     try {
       const result = await sendOrderData(items, totalPrice, orderType);
-      if (result.success) {
-        console.log("주문 데이터 전송 성공:", result.data);
+      if (result.success && result.orderId) {
+        console.log("주문 데이터 전송 성공:", result.orderId);
+        setOrderId(result.orderId);
       } else {
         console.error("주문 데이터 전송 실패:", result.error);
       }
@@ -41,9 +43,13 @@ export default function PaymentScreen({
     processPayment();
 
     //자동 리다이렉트
-    const timer = setTimeout(() => onNfcTransfer(), TIMINGS.AUTO_REDIRECT_MS);
+    const timer = setTimeout(() => {
+      if (orderId) {
+        onNfcTransfer(orderId);
+      }
+    }, TIMINGS.AUTO_REDIRECT_MS);
     return () => clearTimeout(timer);
-  }, [processPayment, onNfcTransfer]);
+  }, [processPayment, onNfcTransfer, orderId]);
 
   return (
     <div className="h-full flex items-center justify-center p-8">
@@ -74,8 +80,9 @@ export default function PaymentScreen({
           <div className="p-10">
             <div className="flex gap-">
               <button
-                onClick={onNfcTransfer}
-                className="flex-1 bg-linear-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white py-4 rounded-xl transition-all duration-300 flex items-center justify-center text-2xl font-bold"
+                onClick={() => orderId && onNfcTransfer(orderId)}
+                disabled={!orderId}
+                className="flex-1 bg-linear-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white py-4 rounded-xl transition-all duration-300 flex items-center justify-center text-2xl font-bold disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 영수증 발급받기
               </button>

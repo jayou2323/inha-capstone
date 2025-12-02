@@ -9,6 +9,7 @@ import type { CartItem, OrderType, ScreenType } from "./types";
 export default function App() {
   const [screen, setScreen] = useState<ScreenType>("start");
   const [orderType, setOrderType] = useState<OrderType>("takeout");
+  const [currentOrderId, setCurrentOrderId] = useState<string | null>(null);
   const [completedOrder, setCompletedOrder] = useState<{
     items: CartItem[];
     totalPrice: number;
@@ -32,12 +33,19 @@ export default function App() {
     []
   );
 
-  const handleNfcTransfer = useCallback(() => {
+  const handleNfcTransfer = useCallback((orderId: string) => {
+    setCurrentOrderId(orderId);
     setScreen("nfcTag");
   }, []);
 
   const handleNfcTagComplete = useCallback(() => {
     setScreen("nfcComplete");
+  }, []);
+
+  const handleNfcError = useCallback((error: string) => {
+    console.error("NFC 에러:", error);
+    alert(`NFC 오류: ${error}\n관리자에게 문의해주세요.`);
+    setScreen("start");
   }, []);
 
   const handleNfcComplete = useCallback(() => {
@@ -69,8 +77,12 @@ export default function App() {
           />
         )}
 
-        {screen === "nfcTag" && (
-          <NfcTagScreen onTagComplete={handleNfcTagComplete}/>
+        {screen === "nfcTag" && currentOrderId && (
+          <NfcTagScreen
+            orderId={currentOrderId}
+            onTagComplete={handleNfcTagComplete}
+            onTagFailed={handleNfcError}
+          />
         )}
 
         {screen === "nfcComplete" && (

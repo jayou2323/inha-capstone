@@ -28,3 +28,11 @@ export interface Category {
   id: string;
   name: string;
 }
+
+// NFC 관련 타입
+export interface NfcSession {
+  sessionId: string;
+  status: "pending" | "ready" | "tagging" | "completed" | "expired" | "failed";
+  expiresAt: string;
+  message?: string;
+}
