@@ -24,3 +24,16 @@ export interface PN532Config {
   taggingTimeoutMs: number;
   maxRetries: number;
 }
+
+// PN532 서비스 공통 인터페이스 (실제/모의 공통 사용)
+export interface IPN532Service {
+  initialize(): Promise<boolean>;
+  initAsTarget(ndefMessage: Buffer): Promise<boolean>;
+  waitForTag(timeoutMs: number): Promise<boolean>;
+  /**
+   * 에러 이후 재초기화
+   * 실제 구현은 boolean 또는 void를 반환할 수 있으므로 유연하게 정의
+   */
+  reinitialize(): Promise<void | boolean>;
+  close(): void;
+}

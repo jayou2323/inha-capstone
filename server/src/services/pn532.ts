@@ -260,18 +260,13 @@ export class PN532Service {
     }
 
     return new Promise((resolve, reject) => {
-      this.i2cBus!.i2cWrite(
-        this.config.i2cAddress,
-        data.length,
-        data,
-        (error) => {
-          if (error) {
-            reject(error);
-          } else {
-            resolve();
-          }
+      this.i2cBus!.i2cWrite(this.config.i2cAddress, data.length, data, (error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
         }
-      );
+      });
     });
   }
 
@@ -310,19 +305,14 @@ export class PN532Service {
 
     return new Promise((resolve) => {
       const buffer = Buffer.alloc(1);
-      this.i2cBus!.i2cRead(
-        this.config.i2cAddress,
-        1,
-        buffer,
-        (error) => {
-          if (error) {
-            resolve(false);
-          } else {
-            // Ready 상태: 0x01
-            resolve((buffer[0] & 0x01) === 0x01);
-          }
+      this.i2cBus!.i2cRead(this.config.i2cAddress, 1, buffer, (error) => {
+        if (error) {
+          resolve(false);
+        } else {
+          // Ready 상태: 0x01
+          resolve((buffer[0] & 0x01) === 0x01);
         }
-      );
+      });
     });
   }
 
@@ -340,7 +330,7 @@ export class PN532Service {
         this.config.i2cAddress,
         buffer.length,
         buffer,
-        (error, bytesRead, resultBuffer) => {
+        (error: Error | null, bytesRead: number, resultBuffer: Buffer) => {
           if (error || bytesRead === 0) {
             resolve(null);
           } else {

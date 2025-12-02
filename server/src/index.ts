@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import { MockPN532Service } from './utils/mock-pn532.js';
 import { SessionManager } from './services/session-manager.js';
 import { NfcController } from './controllers/nfc.controller.js';
-import type { PN532Config } from './types/index.js';
+import type { IPN532Service, PN532Config } from './types/index.js';
 
 // 환경 변수 로드
 dotenv.config();
@@ -58,7 +58,7 @@ async function main() {
 
     // PN532 초기화
     console.log('Initializing PN532...');
-    let pn532;
+    let pn532: IPN532Service;
 
     if (useMock) {
       pn532 = new MockPN532Service(pn532Config);

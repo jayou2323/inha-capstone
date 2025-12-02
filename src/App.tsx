@@ -9,7 +9,7 @@ import type { CartItem, OrderType, ScreenType } from "./types";
 export default function App() {
   const [screen, setScreen] = useState<ScreenType>("start");
   const [orderType, setOrderType] = useState<OrderType>("takeout");
-  const [currentOrderId, setCurrentOrderId] = useState<string | null>(null);
+  const [currentReceiptUrl, setCurrentReceiptUrl] = useState<string | null>(null);
   const [completedOrder, setCompletedOrder] = useState<{
     items: CartItem[];
     totalPrice: number;
@@ -33,8 +33,8 @@ export default function App() {
     []
   );
 
-  const handleNfcTransfer = useCallback((orderId: string) => {
-    setCurrentOrderId(orderId);
+  const handleNfcTransfer = useCallback((receiptUrl: string) => {
+    setCurrentReceiptUrl(receiptUrl);
     setScreen("nfcTag");
   }, []);
 
@@ -77,9 +77,9 @@ export default function App() {
           />
         )}
 
-        {screen === "nfcTag" && currentOrderId && (
+        {screen === "nfcTag" && currentReceiptUrl && (
           <NfcTagScreen
-            orderId={currentOrderId}
+            receiptUrl={currentReceiptUrl}
             onTagComplete={handleNfcTagComplete}
             onTagFailed={handleNfcError}
           />

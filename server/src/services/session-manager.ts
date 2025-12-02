@@ -1,6 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import type { NfcSession, NfcSessionRequest } from '../types/index.js';
-import { PN532Service } from './pn532.js';
+import type { IPN532Service, NfcSession, NfcSessionRequest } from '../types/index.js';
 import { NdefUrlRecord } from '../utils/ndef.js';
 
 /**
@@ -13,11 +12,11 @@ export class SessionManager {
   private sessions: Map<string, NfcSession> = new Map();
   private queue: string[] = [];
   private isProcessing = false;
-  private pn532: PN532Service;
+  private pn532: IPN532Service;
   private sessionTimeoutMs: number;
   private taggingTimeoutMs: number;
 
-  constructor(pn532: PN532Service, sessionTimeoutMs = 30000, taggingTimeoutMs = 10000) {
+  constructor(pn532: IPN532Service, sessionTimeoutMs = 30000, taggingTimeoutMs = 10000) {
     this.pn532 = pn532;
     this.sessionTimeoutMs = sessionTimeoutMs;
     this.taggingTimeoutMs = taggingTimeoutMs;

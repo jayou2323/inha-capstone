@@ -10,7 +10,7 @@ import {
 import { createNfcSession, getNfcSessionStatus } from "../lib/api";
 
 interface NfcTagScreenProps {
-  orderId: string;
+  receiptUrl: string;
   onTagComplete: () => void;
   onTagFailed?: (error: string) => void;
 }
@@ -18,7 +18,7 @@ interface NfcTagScreenProps {
 const LOADING_DOTS_DELAYS = [0, 0.3, 0.6] as const;
 
 export default function NfcTagScreen({
-  orderId,
+  receiptUrl,
   onTagComplete,
   onTagFailed,
 }: NfcTagScreenProps) {
@@ -28,8 +28,8 @@ export default function NfcTagScreen({
   // 1. NFC 세션 생성
   useEffect(() => {
     const initSession = async () => {
-      console.log(`[NFC] Creating session for order: ${orderId}`);
-      const result = await createNfcSession(orderId);
+      console.log(`[NFC] Creating session for receipt URL: ${receiptUrl}`);
+      const result = await createNfcSession(receiptUrl);
 
       if (result.success && result.sessionId) {
         console.log(`[NFC] Session created: ${result.sessionId}`);
@@ -40,7 +40,7 @@ export default function NfcTagScreen({
       }
     };
     initSession();
-  }, [orderId, onTagFailed]);
+  }, [receiptUrl, onTagFailed]);
 
   // 2. 상태 폴링
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle, Loader2 } from "lucide-react";
 import type { CartItem, OrderType } from "../types";
 import { sendOrderData } from "../lib/api";
@@ -8,7 +8,7 @@ interface PaymentScreenProps {
   orderType: OrderType;
   items: CartItem[];
   totalPrice: number;
-  onNfcTransfer: (orderId: string) => void;
+  onNfcTransfer: (receiptUrl: string) => void;
 }
 
 export default function PaymentScreen({
@@ -19,37 +19,54 @@ export default function PaymentScreen({
 }: PaymentScreenProps) {
   const [isPaymentComplete, setIsPaymentComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [orderId, setOrderId] = useState<string | null>(null);
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
 
-  const processPayment = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const result = await sendOrderData(items, totalPrice, orderType);
-      if (result.success && result.orderId) {
-        console.log("주문 데이터 전송 성공:", result.orderId);
-        setOrderId(result.orderId);
-      } else {
-        console.error("주문 데이터 전송 실패:", result.error);
-      }
-    } catch (error) {
-      console.error("결제 처리 중 오류:", error);
-    } finally {
-      setIsPaymentComplete(true);
-      setIsLoading(false);
-    }
-  }, [items, totalPrice, orderType]);
-
+  // 1) 결제 처리: 결제 화면 진입 시 한 번만 실행 (items/price/type 변경 시에만 재실행)
   useEffect(() => {
+    let isActive = true;
+
+    const processPayment = async () => {
+      console.log("processPayment");
+      setIsLoading(true);
+      try {
+        const result = await sendOrderData(items, totalPrice, orderType);
+        if (!isActive) return;
+
+        if (result.success && result.shortUrl) {
+          console.log("주문 데이터 전송 성공 (short_url):", result.shortUrl);
+          setReceiptUrl(result.shortUrl);
+        } else {
+          console.error(
+            "주문 데이터 전송 실패:",
+            result.error ?? "알 수 없는 오류"
+          );
+        }
+      } catch (error) {
+        if (!isActive) return;
+        console.error("결제 처리 중 오류:", error);
+      } finally {
+        if (!isActive) return;
+        setIsPaymentComplete(true);
+        setIsLoading(false);
+      }
+    };
+
     processPayment();
 
-    //자동 리다이렉트
+    return () => {
+      isActive = false;
+    };
+  }, [items, totalPrice, orderType]);
+
+  // 2) 자동 리다이렉트: receiptUrl 이 준비된 후 일정 시간 뒤에 NFC 화면으로 전환
+  useEffect(() => {
+    if (!receiptUrl) return;
+
     const timer = setTimeout(() => {
-      if (orderId) {
-        onNfcTransfer(orderId);
-      }
+      onNfcTransfer(receiptUrl);
     }, TIMINGS.AUTO_REDIRECT_MS);
     return () => clearTimeout(timer);
-  }, [processPayment, onNfcTransfer, orderId]);
+  }, [onNfcTransfer, receiptUrl]);
 
   return (
     <div className="h-full flex items-center justify-center p-8">
@@ -80,8 +97,8 @@ export default function PaymentScreen({
           <div className="p-10">
             <div className="flex gap-">
               <button
-                onClick={() => orderId && onNfcTransfer(orderId)}
-                disabled={!orderId}
+                onClick={() => receiptUrl && onNfcTransfer(receiptUrl)}
+                disabled={!receiptUrl}
                 className="flex-1 bg-linear-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white py-4 rounded-xl transition-all duration-300 flex items-center justify-center text-2xl font-bold disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 영수증 발급받기

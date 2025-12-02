@@ -43,10 +43,36 @@ export const sendOrderData = async (
       },
     });
     console.log("API Response:", response.data);
+
+    const rawData = response.data as any;
+    // 1차: 최상위에 short_url 있는 경우
+    let shortUrl: string | undefined = rawData?.short_url;
+
+    // 2차: Lambda/API Gateway 형태로 body 안에 JSON 문자열로 들어있는 경우
+    if (!shortUrl && rawData?.body) {
+      try {
+        const body =
+          typeof rawData.body === "string"
+            ? JSON.parse(rawData.body)
+            : rawData.body;
+        shortUrl = body?.short_url;
+      } catch (e) {
+        console.error("API Error: body JSON 파싱 실패", e, rawData.body);
+      }
+    }
+
+    if (!shortUrl) {
+      console.error("API Error: 응답에 short_url이 없습니다.", response.data);
+      return {
+        success: false,
+        error: new Error("응답에 영수증 URL(short_url)이 없습니다."),
+      };
+    }
+
     return {
       success: true,
-      orderId: response.data.orderId,
-      data: response.data
+      shortUrl,
+      data: response.data,
     };
   } catch (error) {
     console.error("API Error:", error);
@@ -64,13 +90,15 @@ const NFC_BRIDGE_URL = "http://localhost:3001";
  * NFC 세션 생성
  */
 export const createNfcSession = async (
-  orderId: string
+  receiptUrl: string
 ): Promise<{ success: boolean; sessionId?: string; error?: any }> => {
   try {
-    console.log(`[NFC API] Creating session for order: ${orderId}`);
+    console.log(`[NFC API] Creating session for receipt URL: ${receiptUrl}`);
     const response = await axios.post(
       `${NFC_BRIDGE_URL}/api/nfc/sessions`,
-      { orderId },
+      // 서버는 orderId 필드를 요구하지만, 실제 NDEF에 쓸 것은 receiptUrl 이므로
+      // 여기서는 receiptUrl을 함께 넘겨준다.
+      { orderId: receiptUrl, receiptUrl },
       {
         headers: {
           "Content-Type": "application/json",
