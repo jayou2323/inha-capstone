@@ -64,7 +64,8 @@ export class PN532Service {
   private async getFirmwareVersion(): Promise<string | null> {
     try {
       const response = await this.sendCommand(
-        Buffer.from([PN532Service.CMD_GET_FIRMWARE_VERSION])
+        Buffer.from([PN532Service.CMD_GET_FIRMWARE_VERSION]),
+        this.config.readyTimeoutMs
       );
 
       if (!response || response.length < 4) {
@@ -92,7 +93,8 @@ export class PN532Service {
       // Timeout: 0x14 (20 * 50ms = 1 second)
       // IRQ: 0x01 (Use IRQ pin)
       const response = await this.sendCommand(
-        Buffer.from([PN532Service.CMD_SAM_CONFIGURATION, 0x01, 0x14, 0x01])
+        Buffer.from([PN532Service.CMD_SAM_CONFIGURATION, 0x01, 0x14, 0x01]),
+        this.config.readyTimeoutMs
       );
 
       return response !== null;
