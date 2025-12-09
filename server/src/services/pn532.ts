@@ -116,6 +116,7 @@ export class PN532Service {
 
   /**
    * 카드 에뮬레이션 모드로 초기화
+   * TgInitAsTarget은 ACK만 받으면 성공 (외부 리더기가 SELECT할 때까지 응답 안 옴)
    */
   async initAsTarget(ndefMessage: Buffer, timeoutMs: number = 0): Promise<boolean> {
     try {
@@ -148,27 +149,15 @@ export class PN532Service {
       
       console.log(`[PN532] Sending TgInitAsTarget command (${command.length} bytes)`);
 
-      const actualTimeout = timeoutMs > 0 ? timeoutMs : this.config.readyTimeoutMs;
-      
-      // Retry 로직 추가: Syntax Error(0x7F)나 ACK Timeout 시 재시도
-      let retryCount = 0;
-      const maxRetries = 2;
+      // TgInitAsTarget은 ACK만 받으면 성공으로 간주 (응답은 태깅 시 옴)
+      const ackReceived = await this.sendCommandAckOnly(command);
 
-      while (retryCount <= maxRetries) {
-        const response = await this.sendCommand(command, actualTimeout);
-
-        if (response) {
-          console.log(`[PN532] TgInitAsTarget response: ${response.toString('hex')}`);
-          console.log('[PN532] Target mode initialized, waiting for tag...');
-          return true;
-        }
-
-        console.warn(`[PN532] InitAsTarget failed (Attempt ${retryCount + 1}/${maxRetries + 1}). Retrying...`);
-        retryCount++;
-        await this.delay(200); // 재시도 전 대기
+      if (ackReceived) {
+        console.log('[PN532] Target mode initialized (ACK received), ready for tagging...');
+        return true;
       }
 
-      console.error('[PN532] Failed to initialize as target after retries');
+      console.error('[PN532] Failed to initialize as target (No ACK)');
       return false;
     } catch (error) {
       console.error('[PN532] Init as target failed:', error);
@@ -178,28 +167,81 @@ export class PN532Service {
 
   /**
    * 태깅 이벤트 대기 (Polling)
+   * TgInitAsTarget의 응답이나 TgGetData로 태깅 감지
    */
   async waitForTag(timeoutMs: number): Promise<boolean> {
     try {
-      console.log(`[PN532] Waiting for tag (timeout: ${timeoutMs}ms)...`);
+      console.log(`[PN532] Waiting for NFC tag (timeout: ${timeoutMs}ms)...`);
       
       const startTime = Date.now();
+      let checkCount = 0;
+      
       while (Date.now() - startTime < timeoutMs) {
-        const response = await this.sendCommand(
-          Buffer.from([PN532Service.CMD_TG_GET_DATA]),
-          1000
-        );
-
-        if (response && response.length > 0 && response[0] === 0x00) {
-           console.log('[PN532] Tag detected and data exchanged');
-           return true;
+        // PN532가 준비 상태인지 확인
+        if (await this.isReady()) {
+          const data = await this.readData();
+          if (data && data.length > 0) {
+            checkCount++;
+            console.log(`[PN532-DEBUG] Tag check #${checkCount}: ${data.toString('hex').substring(0, 40)}...`);
+            
+            // TgInitAsTarget의 지연된 응답이나 실제 데이터가 있으면 성공
+            const frame = this.extractResponseFrame();
+            if (frame) {
+              console.log('[PN532] Tag detected! Data received.');
+              return true;
+            }
+          }
         }
-        await this.delay(200);
+        await this.delay(500); // 0.5초마다 체크
       }
 
-      console.log('[PN532] Tag timeout');
+      console.log('[PN532] Tag timeout (no phone detected)');
       return false;
     } catch (error) {
+      console.error('[PN532] waitForTag error:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 명령 전송 (ACK만 대기)
+   * TgInitAsTarget처럼 응답이 지연되는 명령용
+   */
+  private async sendCommandAckOnly(command: Buffer): Promise<boolean> {
+    if (!this.i2cBus) throw new Error('I2C bus not opened');
+
+    try {
+      this.buffer = Buffer.alloc(0);
+      await this.flushInputBuffer();
+      await this.delay(50);
+
+      const frame = this.buildFrame(command);
+      console.log(`[PN532-DEBUG] TX >> ${frame.toString('hex')}`);
+      await this.i2cWrite(frame);
+
+      // ACK만 대기 (100ms)
+      const startTime = Date.now();
+      while (Date.now() - startTime < 200) {
+        if (await this.isReady()) {
+          const chunk = await this.readData();
+          if (chunk && chunk.length > 0) {
+            console.log(`[PN532-DEBUG] RX Chunk << ${chunk.toString('hex')}`);
+            this.buffer = Buffer.concat([this.buffer, chunk]);
+            
+            const ackIndex = this.buffer.indexOf(PN532Service.ACK_SEQ);
+            if (ackIndex !== -1) {
+              console.log('[PN532-DEBUG] ACK Received');
+              return true;
+            }
+          }
+        }
+        await this.delay(10);
+      }
+
+      console.warn('[PN532] No ACK received');
+      return false;
+    } catch (error) {
+      console.error('[PN532] sendCommandAckOnly error:', error);
       return false;
     }
   }
