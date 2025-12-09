@@ -9,6 +9,9 @@ export class PN532Service {
   private i2cBus: I2cBus | null = null;
   private config: PN532Config;
   private isInitialized = false;
+  
+  // ACK 읽고 남은 데이터 보관용 버퍼
+  private remainingBuffer: Buffer = Buffer.alloc(0);
 
   // PN532 명령 코드
   private static readonly CMD_GET_FIRMWARE_VERSION = 0x02;
@@ -24,6 +27,10 @@ export class PN532Service {
   private static readonly POSTAMBLE = 0x00;
   private static readonly HOST_TO_PN532 = 0xd4;
   private static readonly PN532_TO_HOST = 0xd5;
+  
+  // ACK 패턴: 00 00 FF 00 FF 00
+  // I2C는 앞에 Status(01)이 붙는 경우가 많음. 여기서는 raw sequence만 정의
+  private static readonly ACK_SEQ = Buffer.from([0x00, 0x00, 0xff, 0x00, 0xff, 0x00]);
 
   constructor(config: PN532Config) {
     this.config = config;
@@ -119,18 +126,9 @@ export class PN532Service {
 
       console.log('[PN532] Initializing as target (card emulation mode)...');
 
-      // TgInitAsTarget (0x8C) 파라미터 구성 (UM0701-02 User Manual 참조)
-      // Mode (1 byte): 0x00
-      // Mifare Params (6 bytes):
-      //   - SENS_RES (2 bytes): 0x04, 0x00
-      //   - NFCID1t (3 bytes): Random or Fixed (e.g. 0x12, 0x34, 0x56)
-      //   - SEL_RES (1 byte): 0x20 (ISO/IEC 14443-4) or 0x60 (NFCIP-1 Target)
-      // FeliCa Params (18 bytes): All 0
-      // NFCID3t (10 bytes): All 0
-      // L_Gt (1 byte): Length of General Bytes
-      // Gt (Var): General Bytes (NDEF message)
-      // L_Tk (1 byte): Length of Historical Bytes
-      // Tk (Var): Historical Bytes (Empty)
+      // TgInitAsTarget (0x8C) 파라미터 구성
+      // NDEF 메시지 길이에 따른 주의: PN532 내부 버퍼 제한이나 I2C 타이밍 이슈가 있을 수 있음.
+      // 너무 긴 메시지는 처음에 실패할 수 있으므로, 테스트 단계에서는 짧게 줄여볼 수 있음.
 
       const mode = 0x00;
       const sensRes = Buffer.from([0x04, 0x00]);
@@ -155,8 +153,7 @@ export class PN532Service {
       
       console.log(`[PN532] Sending TgInitAsTarget command (${command.length} bytes)`);
 
-      // TgInitAsTarget은 외부 리더기가 활성화할 때까지 응답하지 않을 수 있음
-      // 따라서 타임아웃을 충분히 길게 설정해야 함
+      // 타임아웃
       const actualTimeout = timeoutMs > 0 ? timeoutMs : this.config.readyTimeoutMs;
       
       const response = await this.sendCommand(command, actualTimeout);
@@ -166,11 +163,7 @@ export class PN532Service {
         return false;
       }
       
-      // Response of TgInitAsTarget: Mode (1 byte) + Initiator Command (Var)
-      // Mode 1: Active, 2: Passive... (Usually returns 1 byte Mode first)
-      // but if successful, it means we are selected.
       console.log(`[PN532] TgInitAsTarget response: ${response.toString('hex')}`);
-
       console.log('[PN532] Target mode initialized, waiting for tag...');
       return true;
     } catch (error) {
@@ -186,10 +179,6 @@ export class PN532Service {
     try {
       console.log(`[PN532] Waiting for tag (timeout: ${timeoutMs}ms)...`);
       
-      // TgInitAsTarget이 성공했다는 것은 이미 태그(리더기)에 의해 선택되었다는 의미일 수 있음.
-      // (Active 모드가 아니면 보통 Select 과정이 포함됨)
-      // 여기서 TgGetData를 호출하여 데이터 교환 준비가 되었는지 확인
-
       const startTime = Date.now();
       while (Date.now() - startTime < timeoutMs) {
         const response = await this.sendCommand(
@@ -221,8 +210,13 @@ export class PN532Service {
     if (!this.i2cBus) throw new Error('I2C bus not opened');
 
     try {
-      // 1. 명령 전송 전 약간의 딜레이
-      await this.delay(20);
+      // 0. 잔여 버퍼 및 PN532 입력 버퍼 비우기 (Flush)
+      // 이전 명령의 쓰레기 응답이나 아직 읽지 않은 데이터가 있다면 제거
+      this.remainingBuffer = Buffer.alloc(0);
+      await this.flushInputBuffer();
+
+      // 1. 명령 전송
+      await this.delay(20); // 안정성 딜레이
 
       const frame = this.buildFrame(command);
       console.log(`[PN532-DEBUG] TX >> ${frame.toString('hex')}`);
@@ -236,6 +230,7 @@ export class PN532Service {
       }
 
       // 3. 실제 응답 대기
+      // waitForAck에서 remainingBuffer에 데이터가 들어갔을 수 있음
       const response = await this.waitForResponse(timeoutMs);
       return response;
 
@@ -245,14 +240,49 @@ export class PN532Service {
     }
   }
 
+  /**
+   * 입력 버퍼 비우기 (Flush)
+   * PN532가 보낼 데이터가 없을 때까지 읽어냄
+   */
+  private async flushInputBuffer(): Promise<void> {
+    try {
+       // 최대 3번 시도해서 데이터가 있으면 읽어서 버림
+       for (let i = 0; i < 3; i++) {
+         if (await this.isReady()) {
+            const garbage = await this.readData();
+            if (garbage && garbage.length > 0) {
+              console.log(`[PN532-DEBUG] Flushed garbage: ${garbage.toString('hex')}`);
+            }
+         } else {
+           break;
+         }
+         await this.delay(10);
+       }
+    } catch (e) {
+      // Ignore errors during flush
+    }
+  }
+
   private async waitForAck(timeoutMs: number): Promise<boolean> {
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
       if (await this.isReady()) {
         const data = await this.readData();
         if (data) {
-           console.log(`[PN532-DEBUG] ACK << ${data.toString('hex')}`);
-           if (this.isAckFrame(data)) return true;
+           console.log(`[PN532-DEBUG] ACK Check << ${data.toString('hex')}`);
+           
+           // ACK 찾기
+           const ackIndex = data.indexOf(PN532Service.ACK_SEQ);
+           if (ackIndex !== -1) {
+             // ACK 발견
+             // ACK 시퀀스(6바이트) 뒤에 데이터가 더 있다면 remainingBuffer에 저장
+             const endOfAck = ackIndex + PN532Service.ACK_SEQ.length;
+             if (endOfAck < data.length) {
+               this.remainingBuffer = data.slice(endOfAck);
+               console.log(`[PN532-DEBUG] Saved remaining buffer: ${this.remainingBuffer.toString('hex')}`);
+             }
+             return true;
+           }
         }
       }
       await this.delay(10);
@@ -262,12 +292,44 @@ export class PN532Service {
 
   private async waitForResponse(timeoutMs: number): Promise<Buffer | null> {
     const startTime = Date.now();
+    
+    // 1. 이미 읽어둔 데이터가 있는지 확인
+    if (this.remainingBuffer.length > 0) {
+      console.log(`[PN532-DEBUG] Processing from remaining buffer: ${this.remainingBuffer.toString('hex')}`);
+      const result = this.parseFrame(this.remainingBuffer);
+      if (result) {
+        this.remainingBuffer = Buffer.alloc(0); // 사용 완료
+        return result;
+      }
+      // 파싱 실패 시 버퍼에 데이터가 부족한 것일 수 있으니 계속 진행
+      // (단, 현재 구조상 조각난 프레임 처리는 복잡하므로, 
+      //  단순하게 남은 버퍼는 이번 턴에서 소진된 것으로 처리하고 새로 읽음)
+      //  실제로는 append 해야하지만, 보통은 한 번에 다 옴.
+      //  여기서는 remainingBuffer + 새로 읽은 데이터를 합치는 로직으로 가겠음.
+    }
+
     while (Date.now() - startTime < timeoutMs) {
       if (await this.isReady()) {
-        const data = await this.readData();
-        if (data && !this.isAckFrame(data)) {
-           console.log(`[PN532-DEBUG] RX << ${data.toString('hex')}`);
-           return this.parseFrame(data);
+        const newData = await this.readData();
+        if (newData) {
+           console.log(`[PN532-DEBUG] RX << ${newData.toString('hex')}`);
+           
+           // 기존 버퍼와 합침
+           this.remainingBuffer = Buffer.concat([this.remainingBuffer, newData]);
+           
+           // ACK 프레임이 또 들어오면 무시 (가끔 재전송 등으로 들어옴)
+           if (this.isAckFrame(this.remainingBuffer)) {
+             // ACK만 있으면 비우고 계속 대기, 데이터 섞여있으면 ACK 제거 후 처리 등 필요하나
+             // 여기서는 단순하게 ACK가 아닌지 체크
+             // -> isAckFrame은 "포함" 여부만 보므로, ACK가 포함되어 있어도 뒤에 데이터가 있을 수 있음.
+             // 복잡해지므로 parseFrame에게 맡김 (parseFrame은 Preamble+StartCode 찾음)
+           }
+
+           const result = this.parseFrame(this.remainingBuffer);
+           if (result) {
+             this.remainingBuffer = Buffer.alloc(0); // 성공 시 비움
+             return result;
+           }
         }
       }
       await this.delay(10);
@@ -312,7 +374,6 @@ export class PN532Service {
   private parseFrame(buffer: Buffer): Buffer | null {
     let offset = 0;
     // Find Preamble (00) followed by Start Code (00 FF)
-    // Sometimes I2C read returns status byte first, or garbage.
     // Scan for 00 00 FF pattern
     while (offset < buffer.length - 2) {
       if (buffer[offset] === 0x00 && buffer[offset + 1] === 0x00 && buffer[offset + 2] === 0xff) {
@@ -321,32 +382,34 @@ export class PN532Service {
       offset++;
     }
 
-    if (offset >= buffer.length - 2) return null;
+    if (offset >= buffer.length - 2) return null; // 헤더 못 찾음
 
     const frame = buffer.slice(offset);
-    if (frame.length < 7) return null; // Min valid frame length
+    if (frame.length < 7) return null; // 너무 짧음 (헤더3 +  len2 + TFI1 + chk2 = 8 최소?)
+    // 최소 구조: 00 00 FF LEN LCS TFI ... DCS 00
+    // 최소 6 + 데이터길이
 
     // frame[0]=00, frame[1]=00, frame[2]=FF
     const length = frame[3];
     const lengthChecksum = frame[4];
 
-    if (((length + lengthChecksum) & 0xff) !== 0) return null;
+    if (((length + lengthChecksum) & 0xff) !== 0) return null; // 길이 체크섬 오류
+
+    if (frame.length < 5 + length + 2) return null; // 데이터 전체가 아직 안 옴
 
     const data = frame.slice(5, 5 + length);
     const dataChecksum = frame[5 + length];
     const calculatedChecksum = (~data.reduce((sum, byte) => sum + byte, 0) + 1) & 0xff;
     
-    if (calculatedChecksum !== dataChecksum) return null;
-    if (data[0] !== PN532Service.PN532_TO_HOST) return null;
+    if (calculatedChecksum !== dataChecksum) return null; // 데이터 체크섬 오류
+    if (data[0] !== PN532Service.PN532_TO_HOST) return null; // 방향 오류
 
     return data.slice(1);
   }
 
   private isAckFrame(buffer: Buffer): boolean {
-    const hex = buffer.toString('hex');
-    // Search for ACK pattern: 00 00 FF 00 FF 00
-    // 참고: I2C는 앞에 Status Byte(0x01) 등이 붙을 수 있으므로 includes로 검색
-    return hex.includes('0000ff00ff00');
+    // ACK: 00 00 FF 00 FF 00
+    return buffer.includes(PN532Service.ACK_SEQ);
   }
 
   private async isReady(): Promise<boolean> {
