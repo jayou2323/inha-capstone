@@ -7,7 +7,7 @@ import {
   NFC_TRANSITIONS,
   ANIMATION_VARIANTS,
 } from "../constants/animations";
-import { createNfcSession, getNfcSessionStatus } from "../lib/api";
+import { createNfcSession } from "../lib/api";
 
 interface NfcTagScreenProps {
   receiptUrl: string;
@@ -30,53 +30,19 @@ export default function NfcTagScreen({
     const initSession = async () => {
       console.log(`[NFC] Creating session for receipt URL: ${receiptUrl}`);
       const result = await createNfcSession(receiptUrl);
-
-      if (result.success && result.sessionId) {
-        console.log(`[NFC] Session created: ${result.sessionId}`);
-        setSessionId(result.sessionId);
-      } else {
-        console.error("[NFC] Session creation failed");
-        onTagFailed?.("NFC 세션 생성 실패");
-      }
+      const sid = result.sessionId || "latest";
+      console.log(`[NFC] Session ready: ${sid}`);
+      setSessionId(sid);
     };
     initSession();
   }, [receiptUrl, onTagFailed]);
 
-  // 2. 상태 폴링
+  // 2. 상태 완료 처리 (Lambda 흐름에서는 바로 완료)
   useEffect(() => {
     if (!sessionId) return;
-
-    const pollInterval = setInterval(async () => {
-      const session = await getNfcSessionStatus(sessionId);
-
-      if (session) {
-        console.log(`[NFC] Status: ${session.status}`);
-        setStatus(session.status);
-
-        // 완료 상태 체크
-        if (session.status === "completed") {
-          clearInterval(pollInterval);
-          onTagComplete();
-        } else if (session.status === "failed" || session.status === "expired") {
-          clearInterval(pollInterval);
-          onTagFailed?.(session.message || "NFC 태깅 실패");
-        }
-      }
-    }, 500); // 500ms마다 폴링
-
-    // 타임아웃 백업
-    const timeout = setTimeout(() => {
-      clearInterval(pollInterval);
-      if (status !== "completed") {
-        onTagFailed?.("NFC 태깅 시간 초과");
-      }
-    }, TIMINGS.NFC_TAG_TIMEOUT_MS);
-
-    return () => {
-      clearInterval(pollInterval);
-      clearTimeout(timeout);
-    };
-  }, [sessionId, status, onTagComplete, onTagFailed]);
+    setStatus("completed");
+    onTagComplete();
+  }, [sessionId, onTagComplete]);
 
   // 3. 상태별 메시지
   const getStatusMessage = () => {

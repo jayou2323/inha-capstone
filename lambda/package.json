@@ -1,0 +1,14 @@
+{
+  "name": "nfc-redirect-lambda",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "description": "Lambda handlers for saving latest receipt URL and redirecting",
+  "main": "index.js",
+  "scripts": {
+    "build": "echo \"TS not configured; deploy index.ts with ts->js bundler of choice\""
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.612.0"
+  }
+}
+

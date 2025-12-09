@@ -83,8 +83,14 @@ export const sendOrderData = async (
   }
 };
 
-// NFC 브릿지 서버 Base URL (같은 기기에서 실행)
-const NFC_BRIDGE_URL = "http://localhost:3001";
+// Lambda(Function URL 또는 API Gateway) 기반 리다이렉트 저장 API
+// 예시: https://xxxxx.lambda-url.ap-northeast-2.on.aws
+const LAMBDA_BASE_URL =
+  import.meta.env.VITE_LAMBDA_BASE_URL ||
+  "https://example.lambda-url.ap-northeast-2.on.aws";
+// Lambda에서 검사할 API 키
+const LAMBDA_API_KEY =
+  import.meta.env.VITE_LAMBDA_API_KEY || "set-me";
 
 /**
  * NFC 세션 생성
@@ -93,26 +99,28 @@ export const createNfcSession = async (
   receiptUrl: string
 ): Promise<{ success: boolean; sessionId?: string; error?: any }> => {
   try {
-    console.log(`[NFC API] Creating session for receipt URL: ${receiptUrl}`);
-    const response = await axios.post(
-      `${NFC_BRIDGE_URL}/api/nfc/sessions`,
-      // 서버는 orderId 필드를 요구하지만, 실제 NDEF에 쓸 것은 receiptUrl 이므로
-      // 여기서는 receiptUrl을 함께 넘겨준다.
-      { orderId: receiptUrl, receiptUrl },
+    // Lambda에 최신 주문 URL 저장
+    const orderId = `order-${Date.now()}`;
+    console.log(`[NFC API] Sending to Lambda: ${receiptUrl}`);
+    await axios.post(
+      `${LAMBDA_BASE_URL}/api/redirect`,
+      { orderId, receiptUrl },
       {
         headers: {
           "Content-Type": "application/json",
+          "x-api-key": LAMBDA_API_KEY,
         },
       }
     );
-    console.log("[NFC API] Session created:", response.data);
-    return {
-      success: true,
-      sessionId: response.data.sessionId,
-    };
+    // 물리 태그는 고정 URL(예: /r)로 리다이렉트되므로 sessionId는 의미 없음
+    return { success: true, sessionId: "latest" };
   } catch (error) {
-    console.error("[NFC API] Session creation error:", error);
-    return { success: false, error };
+    console.error("[NFC API] Lambda redirect save error:", error);
+    if (axios.isAxiosError(error)) {
+      console.error("Error response:", error.response?.data);
+    }
+    // 네트워크 실패 시에도 UI 에러를 띄우지 않고 진행
+    return { success: true, sessionId: "latest", error };
   }
 };
 
@@ -122,13 +130,11 @@ export const createNfcSession = async (
 export const getNfcSessionStatus = async (
   sessionId: string
 ): Promise<NfcSession | null> => {
-  try {
-    const response = await axios.get(
-      `${NFC_BRIDGE_URL}/api/nfc/sessions/${sessionId}`
-    );
-    return response.data;
-  } catch (error) {
-    console.error("[NFC API] Session status error:", error);
-    return null;
-  }
+  // Lambda 기반 흐름에서는 폴링이 의미 없으므로 즉시 completed 반환
+  return {
+    sessionId,
+    status: "completed",
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 1000 * 60 * 5).toISOString(),
+  } as NfcSession;
 };
