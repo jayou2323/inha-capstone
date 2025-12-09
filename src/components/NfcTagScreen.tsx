@@ -7,6 +7,7 @@ import {
   ANIMATION_VARIANTS,
 } from "../constants/animations";
 import { createNfcSession, getNfcSessionStatus } from "../lib/api";
+import { useRef } from "react";
 
 interface NfcTagScreenProps {
   receiptUrl: string;
@@ -24,9 +25,12 @@ export default function NfcTagScreen({
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("pending");
   const POLL_INTERVAL_MS = 1500;
+  const initOnceRef = useRef(false);
 
   // 1. NFC 세션 생성
   useEffect(() => {
+    if (initOnceRef.current) return;
+    initOnceRef.current = true;
     const initSession = async () => {
       console.log(`[NFC] Creating session for receipt URL: ${receiptUrl}`);
       const result = await createNfcSession(receiptUrl);
