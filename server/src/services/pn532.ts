@@ -124,7 +124,7 @@ export class PN532Service {
       // Mifare Params (6 bytes):
       //   - SENS_RES (2 bytes): 0x04, 0x00
       //   - NFCID1t (3 bytes): Random or Fixed (e.g. 0x12, 0x34, 0x56)
-      //   - SEL_RES (1 byte): 0x20
+      //   - SEL_RES (1 byte): 0x20 (ISO/IEC 14443-4) or 0x60 (NFCIP-1 Target)
       // FeliCa Params (18 bytes): All 0
       // NFCID3t (10 bytes): All 0
       // L_Gt (1 byte): Length of General Bytes
@@ -135,7 +135,7 @@ export class PN532Service {
       const mode = 0x00;
       const sensRes = Buffer.from([0x04, 0x00]);
       const nfcid1t = Buffer.from([0x12, 0x34, 0x56]); // 3 bytes for Mifare Params
-      const selRes = 0x20;
+      const selRes = 0x20; 
       const felicaParams = Buffer.alloc(18, 0);
       const nfcid3t = Buffer.alloc(10, 0);
       const historicalBytes = Buffer.alloc(0);
@@ -152,6 +152,8 @@ export class PN532Service {
         Buffer.from([historicalBytes.length]),
         historicalBytes,
       ]);
+      
+      console.log(`[PN532] Sending TgInitAsTarget command (${command.length} bytes)`);
 
       // TgInitAsTarget은 외부 리더기가 활성화할 때까지 응답하지 않을 수 있음
       // 따라서 타임아웃을 충분히 길게 설정해야 함
@@ -160,13 +162,14 @@ export class PN532Service {
       const response = await this.sendCommand(command, actualTimeout);
 
       if (!response) {
-        console.error('[PN532] Failed to initialize as target');
+        console.error('[PN532] Failed to initialize as target (No response or timeout)');
         return false;
       }
       
       // Response of TgInitAsTarget: Mode (1 byte) + Initiator Command (Var)
       // Mode 1: Active, 2: Passive... (Usually returns 1 byte Mode first)
       // but if successful, it means we are selected.
+      console.log(`[PN532] TgInitAsTarget response: ${response.toString('hex')}`);
 
       console.log('[PN532] Target mode initialized, waiting for tag...');
       return true;
@@ -178,8 +181,6 @@ export class PN532Service {
 
   /**
    * 태깅 이벤트 대기 (Polling)
-   * 이미 InitAsTarget이 성공했다면, PN532는 이미 활성화된 상태일 수 있음.
-   * 하지만 데이터 교환을 위해 TgGetData를 호출하거나 상태를 확인해야 함.
    */
   async waitForTag(timeoutMs: number): Promise<boolean> {
     try {
@@ -220,15 +221,21 @@ export class PN532Service {
     if (!this.i2cBus) throw new Error('I2C bus not opened');
 
     try {
+      // 1. 명령 전송 전 약간의 딜레이
+      await this.delay(20);
+
       const frame = this.buildFrame(command);
+      console.log(`[PN532-DEBUG] TX >> ${frame.toString('hex')}`);
       await this.i2cWrite(frame);
 
+      // 2. ACK 대기
       const ack = await this.waitForAck(100);
       if (!ack) {
         console.warn('[PN532] No ACK received');
         return null;
       }
 
+      // 3. 실제 응답 대기
       const response = await this.waitForResponse(timeoutMs);
       return response;
 
@@ -243,7 +250,10 @@ export class PN532Service {
     while (Date.now() - startTime < timeoutMs) {
       if (await this.isReady()) {
         const data = await this.readData();
-        if (data && this.isAckFrame(data)) return true;
+        if (data) {
+           console.log(`[PN532-DEBUG] ACK << ${data.toString('hex')}`);
+           if (this.isAckFrame(data)) return true;
+        }
       }
       await this.delay(10);
     }
@@ -256,7 +266,8 @@ export class PN532Service {
       if (await this.isReady()) {
         const data = await this.readData();
         if (data && !this.isAckFrame(data)) {
-          return this.parseFrame(data);
+           console.log(`[PN532-DEBUG] RX << ${data.toString('hex')}`);
+           return this.parseFrame(data);
         }
       }
       await this.delay(10);
@@ -334,6 +345,7 @@ export class PN532Service {
   private isAckFrame(buffer: Buffer): boolean {
     const hex = buffer.toString('hex');
     // Search for ACK pattern: 00 00 FF 00 FF 00
+    // 참고: I2C는 앞에 Status Byte(0x01) 등이 붙을 수 있으므로 includes로 검색
     return hex.includes('0000ff00ff00');
   }
 
