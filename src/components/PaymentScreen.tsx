@@ -9,6 +9,7 @@ interface PaymentScreenProps {
   items: CartItem[];
   totalPrice: number;
   onNfcTransfer: (receiptUrl: string) => void;
+  onPaperReceipt: () => void;
 }
 
 export default function PaymentScreen({
@@ -16,6 +17,7 @@ export default function PaymentScreen({
   items,
   totalPrice,
   onNfcTransfer,
+  onPaperReceipt,
 }: PaymentScreenProps) {
   const [isPaymentComplete, setIsPaymentComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -95,13 +97,19 @@ export default function PaymentScreen({
         {/* 영수증 선택 */}
         {!isLoading && isPaymentComplete && (
           <div className="p-10">
-            <div className="flex gap-">
+            <div className="flex flex-col gap-4">
               <button
                 onClick={() => receiptUrl && onNfcTransfer(receiptUrl)}
                 disabled={!receiptUrl}
                 className="flex-1 bg-linear-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white py-4 rounded-xl transition-all duration-300 flex items-center justify-center text-2xl font-bold disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 영수증 발급받기
+              </button>
+              <button
+                onClick={onPaperReceipt}
+                className="flex-1 bg-white text-slate-800 py-4 rounded-xl border border-slate-200 hover:bg-slate-50 transition-all duration-200 text-2xl font-bold"
+              >
+                종이 영수증 발급받기
               </button>
             </div>
 

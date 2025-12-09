@@ -9,10 +9,12 @@ import {
 
 interface NfcTagCompleteScreenProps {
   onComplete: () => void;
+  title?: string;
 }
 
 export default function NfcTagCompleteScreen({
   onComplete,
+  title = "전송 완료",
 }: NfcTagCompleteScreenProps) {
   useEffect(() => {
     const timer = setTimeout(onComplete, TIMINGS.NFC_COMPLETE_TIMEOUT_MS);
@@ -50,7 +52,7 @@ export default function NfcTagCompleteScreen({
           transition={{ delay: 0.3, duration: 0.5 }}
           className="text-4xl font-bold text-slate-900 mb-4"
         >
-          전송 완료
+          {title}
         </motion.h1>
 
         <motion.p

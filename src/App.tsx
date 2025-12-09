@@ -14,6 +14,7 @@ export default function App() {
     items: CartItem[];
     totalPrice: number;
   } | null>(null);
+  const [completeTitle, setCompleteTitle] = useState<string>("전송 완료");
 
   const handleSelectOrderType = useCallback((type: OrderType) => {
     setOrderType(type);
@@ -35,6 +36,7 @@ export default function App() {
 
   const handleNfcTransfer = useCallback((receiptUrl: string) => {
     setCurrentReceiptUrl(receiptUrl);
+    setCompleteTitle("전송 완료");
     setScreen("nfcTag");
   }, []);
 
@@ -74,6 +76,10 @@ export default function App() {
             items={completedOrder.items}
             totalPrice={completedOrder.totalPrice}
             onNfcTransfer={handleNfcTransfer}
+            onPaperReceipt={() => {
+              setCompleteTitle("발급 완료");
+              setScreen("nfcComplete");
+            }}
           />
         )}
 
@@ -86,7 +92,10 @@ export default function App() {
         )}
 
         {screen === "nfcComplete" && (
-          <NfcTagCompleteScreen onComplete={handleNfcComplete} />
+          <NfcTagCompleteScreen
+            title={completeTitle}
+            onComplete={handleNfcComplete}
+          />
         )}
       </div>
     </div>
