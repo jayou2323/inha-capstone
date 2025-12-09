@@ -10,8 +10,8 @@ export class PN532Service {
   private config: PN532Config;
   private isInitialized = false;
   
-  // ACK 읽고 남은 데이터 보관용 버퍼
-  private remainingBuffer: Buffer = Buffer.alloc(0);
+  // 데이터 수신 버퍼 (누적)
+  private buffer: Buffer = Buffer.alloc(0);
 
   // PN532 명령 코드
   private static readonly CMD_GET_FIRMWARE_VERSION = 0x02;
@@ -29,7 +29,6 @@ export class PN532Service {
   private static readonly PN532_TO_HOST = 0xd5;
   
   // ACK 패턴: 00 00 FF 00 FF 00
-  // I2C는 앞에 Status(01)이 붙는 경우가 많음. 여기서는 raw sequence만 정의
   private static readonly ACK_SEQ = Buffer.from([0x00, 0x00, 0xff, 0x00, 0xff, 0x00]);
 
   constructor(config: PN532Config) {
@@ -126,10 +125,6 @@ export class PN532Service {
 
       console.log('[PN532] Initializing as target (card emulation mode)...');
 
-      // TgInitAsTarget (0x8C) 파라미터 구성
-      // NDEF 메시지 길이에 따른 주의: PN532 내부 버퍼 제한이나 I2C 타이밍 이슈가 있을 수 있음.
-      // 너무 긴 메시지는 처음에 실패할 수 있으므로, 테스트 단계에서는 짧게 줄여볼 수 있음.
-
       const mode = 0x00;
       const sensRes = Buffer.from([0x04, 0x00]);
       const nfcid1t = Buffer.from([0x12, 0x34, 0x56]); // 3 bytes for Mifare Params
@@ -153,7 +148,6 @@ export class PN532Service {
       
       console.log(`[PN532] Sending TgInitAsTarget command (${command.length} bytes)`);
 
-      // 타임아웃
       const actualTimeout = timeoutMs > 0 ? timeoutMs : this.config.readyTimeoutMs;
       
       const response = await this.sendCommand(command, actualTimeout);
@@ -201,7 +195,7 @@ export class PN532Service {
   }
 
   /**
-   * 명령 전송 및 응답 수신
+   * 명령 전송 및 응답 수신 (통합 로직)
    */
   private async sendCommand(
     command: Buffer,
@@ -210,29 +204,68 @@ export class PN532Service {
     if (!this.i2cBus) throw new Error('I2C bus not opened');
 
     try {
-      // 0. 잔여 버퍼 및 PN532 입력 버퍼 비우기 (Flush)
-      // 이전 명령의 쓰레기 응답이나 아직 읽지 않은 데이터가 있다면 제거
-      this.remainingBuffer = Buffer.alloc(0);
+      // 0. 버퍼 초기화 (이전 명령의 잔여물 제거, 중요!)
+      this.buffer = Buffer.alloc(0);
+      
+      // I2C 라인 클리어 시도
       await this.flushInputBuffer();
 
       // 1. 명령 전송
-      await this.delay(20); // 안정성 딜레이
+      await this.delay(20);
 
       const frame = this.buildFrame(command);
       console.log(`[PN532-DEBUG] TX >> ${frame.toString('hex')}`);
       await this.i2cWrite(frame);
 
-      // 2. ACK 대기
-      const ack = await this.waitForAck(100);
-      if (!ack) {
-        console.warn('[PN532] No ACK received');
-        return null;
+      // 2. ACK 및 응답 대기 (Stream 처리)
+      // ACK가 오고 나서 Response가 바로 이어서 올 수도 있고, 조금 있다 올 수도 있음.
+      // 하나의 루프에서 데이터를 계속 읽으며 ACK와 Response를 찾음.
+      
+      const startTime = Date.now();
+      let ackReceived = false;
+      
+      while (Date.now() - startTime < timeoutMs) {
+        if (await this.isReady()) {
+           const chunk = await this.readData();
+           if (chunk && chunk.length > 0) {
+             console.log(`[PN532-DEBUG] RX Chunk << ${chunk.toString('hex')}`);
+             this.buffer = Buffer.concat([this.buffer, chunk]);
+             
+             // 2-1. ACK 확인 (아직 못 받았다면)
+             if (!ackReceived) {
+               // ACK 시퀀스 검색
+               const ackIndex = this.buffer.indexOf(PN532Service.ACK_SEQ);
+               if (ackIndex !== -1) {
+                 console.log('[PN532-DEBUG] ACK Received');
+                 ackReceived = true;
+                 
+                 // ACK 앞부분은 버리고, ACK 뒷부분부터 다시 버퍼 구성
+                 // (ACK 바로 뒤에 Response 프레임이 붙어있을 수 있음)
+                 this.buffer = this.buffer.slice(ackIndex + PN532Service.ACK_SEQ.length);
+               }
+             }
+
+             // 2-2. Response Frame 확인 (ACK 받은 후, 혹은 ACK와 동시에)
+             // ACK를 못 받았더라도 Response가 먼저 파싱된다면 성공으로 간주해도 무방하나, 
+             // 표준 절차상 ACK 체크 권장. 여기서는 ACK 수신 여부와 관계없이 프레임 찾기 시도.
+             // (가끔 ACK 놓쳐도 응답은 올 수 있음)
+             
+             const response = this.extractResponseFrame();
+             if (response) {
+               console.log(`[PN532-DEBUG] Valid Response Frame found: ${response.toString('hex')}`);
+               return response;
+             }
+           }
+        }
+        await this.delay(10);
       }
 
-      // 3. 실제 응답 대기
-      // waitForAck에서 remainingBuffer에 데이터가 들어갔을 수 있음
-      const response = await this.waitForResponse(timeoutMs);
-      return response;
+      if (!ackReceived) {
+        console.warn('[PN532] No ACK received');
+      } else {
+        console.warn('[PN532] Response timeout (ACK received)');
+      }
+      return null;
 
     } catch (error) {
       console.error('[PN532] Send command error:', error);
@@ -241,12 +274,100 @@ export class PN532Service {
   }
 
   /**
-   * 입력 버퍼 비우기 (Flush)
-   * PN532가 보낼 데이터가 없을 때까지 읽어냄
+   * 버퍼에서 유효한 응답 프레임을 찾아 추출하고 버퍼에서 제거
    */
+  private extractResponseFrame(): Buffer | null {
+    // 최소 프레임 길이: Preamble(1) + Start(2) + Len(1) + LCS(1) + TFI(1) + DCS(1) + Post(1) = 8
+    if (this.buffer.length < 8) return null;
+
+    // 1. 프레임 헤더 (00 00 FF) 찾기
+    // 버퍼 전체를 훑어서 00 00 FF 패턴이 있는지 확인
+    let offset = 0;
+    let frameFound = false;
+    
+    while (offset < this.buffer.length - 2) {
+      if (this.buffer[offset] === 0x00 && 
+          this.buffer[offset + 1] === 0x00 && 
+          this.buffer[offset + 2] === 0xff) {
+        frameFound = true;
+        break;
+      }
+      offset++;
+    }
+
+    if (!frameFound) {
+      // 헤더를 못 찾았으면, 버퍼의 마지막 2바이트만 남기고 앞부분은 버려도 됨
+      // (다음 청크와 연결되어 00 00 FF가 완성될 수 있으므로 끝부분은 보존)
+      if (this.buffer.length > 2) {
+        const keep = this.buffer.slice(this.buffer.length - 2);
+        // console.log(`[PN532-DEBUG] Discarding garbage: ${this.buffer.slice(0, this.buffer.length - 2).toString('hex')}`);
+        this.buffer = keep;
+      }
+      return null;
+    }
+
+    // 헤더 발견 (offset 위치)
+    // 쓰레기 데이터 제거 (헤더 앞부분)
+    if (offset > 0) {
+      // console.log(`[PN532-DEBUG] Skipping garbage before header: ${this.buffer.slice(0, offset).toString('hex')}`);
+      this.buffer = this.buffer.slice(offset);
+      offset = 0;
+    }
+
+    // 이제 buffer는 00 00 FF ... 로 시작
+    if (this.buffer.length < 5) return null; // 아직 Length 필드까지 안 옴
+
+    const length = this.buffer[3];
+    const lengthChecksum = this.buffer[4];
+
+    // Length Checksum 검증
+    if (((length + lengthChecksum) & 0xff) !== 0) {
+      console.warn('[PN532] Frame Length Checksum error. Skipping invalid header.');
+      // 이 헤더는 가짜임. 00 00 FF ... 패턴이었지만 체크섬이 안 맞음.
+      // 헤더(3바이트)만 제거하고 다시 검색하도록 유도
+      this.buffer = this.buffer.slice(3);
+      return this.extractResponseFrame(); // 재귀 호출로 다음 헤더 찾기
+    }
+
+    // 전체 프레임 길이 확인
+    // Header(5) + Data(Length) + DCS(1) + Post(1)
+    const totalLength = 5 + length + 2;
+    if (this.buffer.length < totalLength) {
+      return null; // 데이터가 아직 다 안 옴. 대기.
+    }
+
+    // 데이터 추출 및 Checksum 검증
+    const data = this.buffer.slice(5, 5 + length);
+    const dataChecksum = this.buffer[5 + length];
+    
+    const calculatedChecksum = (~data.reduce((sum, byte) => sum + byte, 0) + 1) & 0xff;
+    
+    if (calculatedChecksum !== dataChecksum) {
+       console.warn('[PN532] Frame Data Checksum error.');
+       // 체크섬 오류면 이 프레임 버림
+       this.buffer = this.buffer.slice(3);
+       return this.extractResponseFrame();
+    }
+
+    // TFI 확인 (PN532 -> Host: 0xD5)
+    if (data[0] !== PN532Service.PN532_TO_HOST) {
+       console.warn(`[PN532] Invalid TFI: ${data[0].toString(16)}`);
+       // TFI 안 맞으면 무시
+       this.buffer = this.buffer.slice(totalLength);
+       return this.extractResponseFrame();
+    }
+
+    // 성공! 프레임 추출
+    // 버퍼에서 해당 프레임 제거
+    this.buffer = this.buffer.slice(totalLength);
+    
+    // TFI(D5) 제외하고 리턴할지, 포함할지?
+    // 기존 로직은 TFI 제외하고 리턴했음.
+    return data.slice(1);
+  }
+
   private async flushInputBuffer(): Promise<void> {
     try {
-       // 최대 3번 시도해서 데이터가 있으면 읽어서 버림
        for (let i = 0; i < 3; i++) {
          if (await this.isReady()) {
             const garbage = await this.readData();
@@ -259,83 +380,8 @@ export class PN532Service {
          await this.delay(10);
        }
     } catch (e) {
-      // Ignore errors during flush
+      // Ignore
     }
-  }
-
-  private async waitForAck(timeoutMs: number): Promise<boolean> {
-    const startTime = Date.now();
-    while (Date.now() - startTime < timeoutMs) {
-      if (await this.isReady()) {
-        const data = await this.readData();
-        if (data) {
-           console.log(`[PN532-DEBUG] ACK Check << ${data.toString('hex')}`);
-           
-           // ACK 찾기
-           const ackIndex = data.indexOf(PN532Service.ACK_SEQ);
-           if (ackIndex !== -1) {
-             // ACK 발견
-             // ACK 시퀀스(6바이트) 뒤에 데이터가 더 있다면 remainingBuffer에 저장
-             const endOfAck = ackIndex + PN532Service.ACK_SEQ.length;
-             if (endOfAck < data.length) {
-               this.remainingBuffer = data.slice(endOfAck);
-               console.log(`[PN532-DEBUG] Saved remaining buffer: ${this.remainingBuffer.toString('hex')}`);
-             }
-             return true;
-           }
-        }
-      }
-      await this.delay(10);
-    }
-    return false;
-  }
-
-  private async waitForResponse(timeoutMs: number): Promise<Buffer | null> {
-    const startTime = Date.now();
-    
-    // 1. 이미 읽어둔 데이터가 있는지 확인
-    if (this.remainingBuffer.length > 0) {
-      console.log(`[PN532-DEBUG] Processing from remaining buffer: ${this.remainingBuffer.toString('hex')}`);
-      const result = this.parseFrame(this.remainingBuffer);
-      if (result) {
-        this.remainingBuffer = Buffer.alloc(0); // 사용 완료
-        return result;
-      }
-      // 파싱 실패 시 버퍼에 데이터가 부족한 것일 수 있으니 계속 진행
-      // (단, 현재 구조상 조각난 프레임 처리는 복잡하므로, 
-      //  단순하게 남은 버퍼는 이번 턴에서 소진된 것으로 처리하고 새로 읽음)
-      //  실제로는 append 해야하지만, 보통은 한 번에 다 옴.
-      //  여기서는 remainingBuffer + 새로 읽은 데이터를 합치는 로직으로 가겠음.
-    }
-
-    while (Date.now() - startTime < timeoutMs) {
-      if (await this.isReady()) {
-        const newData = await this.readData();
-        if (newData) {
-           console.log(`[PN532-DEBUG] RX << ${newData.toString('hex')}`);
-           
-           // 기존 버퍼와 합침
-           this.remainingBuffer = Buffer.concat([this.remainingBuffer, newData]);
-           
-           // ACK 프레임이 또 들어오면 무시 (가끔 재전송 등으로 들어옴)
-           if (this.isAckFrame(this.remainingBuffer)) {
-             // ACK만 있으면 비우고 계속 대기, 데이터 섞여있으면 ACK 제거 후 처리 등 필요하나
-             // 여기서는 단순하게 ACK가 아닌지 체크
-             // -> isAckFrame은 "포함" 여부만 보므로, ACK가 포함되어 있어도 뒤에 데이터가 있을 수 있음.
-             // 복잡해지므로 parseFrame에게 맡김 (parseFrame은 Preamble+StartCode 찾음)
-           }
-
-           const result = this.parseFrame(this.remainingBuffer);
-           if (result) {
-             this.remainingBuffer = Buffer.alloc(0); // 성공 시 비움
-             return result;
-           }
-        }
-      }
-      await this.delay(10);
-    }
-    console.warn('[PN532] Response timeout');
-    return null;
   }
 
   private async readData(): Promise<Buffer | null> {
@@ -369,47 +415,6 @@ export class PN532Service {
       frameData,
       Buffer.from([dataChecksum, PN532Service.POSTAMBLE]),
     ]);
-  }
-
-  private parseFrame(buffer: Buffer): Buffer | null {
-    let offset = 0;
-    // Find Preamble (00) followed by Start Code (00 FF)
-    // Scan for 00 00 FF pattern
-    while (offset < buffer.length - 2) {
-      if (buffer[offset] === 0x00 && buffer[offset + 1] === 0x00 && buffer[offset + 2] === 0xff) {
-        break;
-      }
-      offset++;
-    }
-
-    if (offset >= buffer.length - 2) return null; // 헤더 못 찾음
-
-    const frame = buffer.slice(offset);
-    if (frame.length < 7) return null; // 너무 짧음 (헤더3 +  len2 + TFI1 + chk2 = 8 최소?)
-    // 최소 구조: 00 00 FF LEN LCS TFI ... DCS 00
-    // 최소 6 + 데이터길이
-
-    // frame[0]=00, frame[1]=00, frame[2]=FF
-    const length = frame[3];
-    const lengthChecksum = frame[4];
-
-    if (((length + lengthChecksum) & 0xff) !== 0) return null; // 길이 체크섬 오류
-
-    if (frame.length < 5 + length + 2) return null; // 데이터 전체가 아직 안 옴
-
-    const data = frame.slice(5, 5 + length);
-    const dataChecksum = frame[5 + length];
-    const calculatedChecksum = (~data.reduce((sum, byte) => sum + byte, 0) + 1) & 0xff;
-    
-    if (calculatedChecksum !== dataChecksum) return null; // 데이터 체크섬 오류
-    if (data[0] !== PN532Service.PN532_TO_HOST) return null; // 방향 오류
-
-    return data.slice(1);
-  }
-
-  private isAckFrame(buffer: Buffer): boolean {
-    // ACK: 00 00 FF 00 FF 00
-    return buffer.includes(PN532Service.ACK_SEQ);
   }
 
   private async isReady(): Promise<boolean> {
