@@ -177,22 +177,27 @@ export class PN532Service {
       let checkCount = 0;
       
       while (Date.now() - startTime < timeoutMs) {
-        // PN532가 준비 상태인지 확인
-        if (await this.isReady()) {
+        // Target 모드에서는 isReady()가 제대로 작동 안 할 수 있으므로 무조건 읽기 시도
+        try {
           const data = await this.readData();
           if (data && data.length > 0) {
             checkCount++;
-            console.log(`[PN532-DEBUG] Tag check #${checkCount}: ${data.toString('hex').substring(0, 40)}...`);
+            console.log(`[PN532-DEBUG] Tag check #${checkCount}: ${data.toString('hex').substring(0, 60)}...`);
+            
+            // 읽은 데이터를 버퍼에 추가
+            this.buffer = Buffer.concat([this.buffer, data]);
             
             // TgInitAsTarget의 지연된 응답이나 실제 데이터가 있으면 성공
             const frame = this.extractResponseFrame();
-            if (frame) {
-              console.log('[PN532] Tag detected! Data received.');
+            if (frame && frame.length > 0) {
+              console.log(`[PN532] Tag detected! Response: ${frame.toString('hex')}`);
               return true;
             }
           }
+        } catch (e) {
+          // 읽기 실패는 무시하고 계속
         }
-        await this.delay(500); // 0.5초마다 체크
+        await this.delay(300); // 0.3초마다 체크
       }
 
       console.log('[PN532] Tag timeout (no phone detected)');
