@@ -151,6 +151,23 @@ export default function NfcTagScreen({
               />
             ))}
           </div>
+
+          {/* NFC 미지원 사용자용 QR 코드 안내 */}
+          <div className="mt-12 bg-slate-50 border border-slate-200 rounded-2xl px-6 py-5 inline-flex items-center gap-5 text-left">
+            <div className="w-32 h-32 rounded-xl overflow-hidden border border-slate-200 bg-white shadow-sm">
+              <img
+                src="/images/qr_code.png"
+                alt="QR code for receipt"
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <div className="text-slate-800">
+              <p className="text-lg font-semibold mb-2">NFC스캔이 어려우신가요?</p>
+              <p className="text-sm text-slate-600 leading-relaxed">
+                QR 스캔하여 영수증을 받아보실 수 있습니다.
+              </p>
+            </div>
+          </div>
         </div>
       </motion.div>
     </div>
