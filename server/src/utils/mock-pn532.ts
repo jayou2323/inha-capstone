@@ -18,8 +18,8 @@ export class MockPN532Service {
     return true;
   }
 
-  async initAsTarget(ndefMessage: Buffer): Promise<boolean> {
-    console.log(`[MockPN532] Init as target - NDEF: ${ndefMessage.length} bytes`);
+  async initAsTarget(ndefMessage: Buffer, timeoutMs: number = 0): Promise<boolean> {
+    console.log(`[MockPN532] Init as target - NDEF: ${ndefMessage.length} bytes (Timeout: ${timeoutMs}ms)`);
     await this.delay(1000);
     return true;
   }

@@ -28,7 +28,7 @@ export interface PN532Config {
 // PN532 서비스 공통 인터페이스 (실제/모의 공통 사용)
 export interface IPN532Service {
   initialize(): Promise<boolean>;
-  initAsTarget(ndefMessage: Buffer): Promise<boolean>;
+  initAsTarget(ndefMessage: Buffer, timeoutMs?: number): Promise<boolean>;
   waitForTag(timeoutMs: number): Promise<boolean>;
   /**
    * 에러 이후 재초기화

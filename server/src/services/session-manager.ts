@@ -145,7 +145,7 @@ export class SessionManager {
       console.log(`[SessionManager] NDEF message created (${ndefMessage.length} bytes)`);
 
       // PN532를 타겟 모드로 초기화
-      const initSuccess = await this.pn532.initAsTarget(ndefMessage);
+      const initSuccess = await this.pn532.initAsTarget(ndefMessage, this.taggingTimeoutMs);
       if (!initSuccess) {
         throw new Error('Failed to initialize PN532 as target');
       }
