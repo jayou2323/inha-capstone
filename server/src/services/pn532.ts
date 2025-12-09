@@ -150,16 +150,26 @@ export class PN532Service {
 
       const actualTimeout = timeoutMs > 0 ? timeoutMs : this.config.readyTimeoutMs;
       
-      const response = await this.sendCommand(command, actualTimeout);
+      // Retry 로직 추가: Syntax Error(0x7F)나 ACK Timeout 시 재시도
+      let retryCount = 0;
+      const maxRetries = 2;
 
-      if (!response) {
-        console.error('[PN532] Failed to initialize as target (No response or timeout)');
-        return false;
+      while (retryCount <= maxRetries) {
+        const response = await this.sendCommand(command, actualTimeout);
+
+        if (response) {
+          console.log(`[PN532] TgInitAsTarget response: ${response.toString('hex')}`);
+          console.log('[PN532] Target mode initialized, waiting for tag...');
+          return true;
+        }
+
+        console.warn(`[PN532] InitAsTarget failed (Attempt ${retryCount + 1}/${maxRetries + 1}). Retrying...`);
+        retryCount++;
+        await this.delay(200); // 재시도 전 대기
       }
-      
-      console.log(`[PN532] TgInitAsTarget response: ${response.toString('hex')}`);
-      console.log('[PN532] Target mode initialized, waiting for tag...');
-      return true;
+
+      console.error('[PN532] Failed to initialize as target after retries');
+      return false;
     } catch (error) {
       console.error('[PN532] Init as target failed:', error);
       return false;
@@ -210,19 +220,17 @@ export class PN532Service {
       // I2C 라인 클리어 시도
       await this.flushInputBuffer();
 
-      // 1. 명령 전송
-      await this.delay(20);
+      // 1. 명령 전송 (딜레이 증가)
+      await this.delay(50); // 20ms -> 50ms로 증가
 
       const frame = this.buildFrame(command);
       console.log(`[PN532-DEBUG] TX >> ${frame.toString('hex')}`);
       await this.i2cWrite(frame);
 
       // 2. ACK 및 응답 대기 (Stream 처리)
-      // ACK가 오고 나서 Response가 바로 이어서 올 수도 있고, 조금 있다 올 수도 있음.
-      // 하나의 루프에서 데이터를 계속 읽으며 ACK와 Response를 찾음.
-      
       const startTime = Date.now();
       let ackReceived = false;
+      let syntaxErrorReceived = false;
       
       while (Date.now() - startTime < timeoutMs) {
         if (await this.isReady()) {
@@ -231,27 +239,35 @@ export class PN532Service {
              console.log(`[PN532-DEBUG] RX Chunk << ${chunk.toString('hex')}`);
              this.buffer = Buffer.concat([this.buffer, chunk]);
              
-             // 2-1. ACK 확인 (아직 못 받았다면)
+             // 2-1. ACK 확인
              if (!ackReceived) {
-               // ACK 시퀀스 검색
                const ackIndex = this.buffer.indexOf(PN532Service.ACK_SEQ);
                if (ackIndex !== -1) {
                  console.log('[PN532-DEBUG] ACK Received');
                  ackReceived = true;
-                 
-                 // ACK 앞부분은 버리고, ACK 뒷부분부터 다시 버퍼 구성
-                 // (ACK 바로 뒤에 Response 프레임이 붙어있을 수 있음)
+                 // ACK 뒷부분 보존
                  this.buffer = this.buffer.slice(ackIndex + PN532Service.ACK_SEQ.length);
                }
              }
 
-             // 2-2. Response Frame 확인 (ACK 받은 후, 혹은 ACK와 동시에)
-             // ACK를 못 받았더라도 Response가 먼저 파싱된다면 성공으로 간주해도 무방하나, 
-             // 표준 절차상 ACK 체크 권장. 여기서는 ACK 수신 여부와 관계없이 프레임 찾기 시도.
-             // (가끔 ACK 놓쳐도 응답은 올 수 있음)
+             // 2-2. Syntax Error 확인 (0x7F)
+             // PN532는 에러 시 ACK 대신 NACK(00 00 FF FF 00 00) 또는 Syntax Error(7F)를 보냄
+             // 여기서는 응답 프레임 추출 시 7F를 체크
              
+             // 2-3. Response Frame 확인
              const response = this.extractResponseFrame();
+             
+             // extractResponseFrame이 null을 반환했더라도,
+             // 내부적으로 TFI 7F 등을 감지했을 수 있음 (현재는 구현 안 함)
+             // 여기서 명시적으로 체크하려면 extractResponseFrame이 에러 상태를 리턴해야 함.
+             
              if (response) {
+               if (response.length === 1 && response[0] === 0x7F) {
+                 console.warn('[PN532] Syntax Error (0x7F) received');
+                 syntaxErrorReceived = true;
+                 return null; // 즉시 실패 처리하고 재시도 유도
+               }
+               
                console.log(`[PN532-DEBUG] Valid Response Frame found: ${response.toString('hex')}`);
                return response;
              }
@@ -262,6 +278,8 @@ export class PN532Service {
 
       if (!ackReceived) {
         console.warn('[PN532] No ACK received');
+      } else if (syntaxErrorReceived) {
+        // 이미 위에서 처리됨
       } else {
         console.warn('[PN532] Response timeout (ACK received)');
       }
@@ -277,11 +295,9 @@ export class PN532Service {
    * 버퍼에서 유효한 응답 프레임을 찾아 추출하고 버퍼에서 제거
    */
   private extractResponseFrame(): Buffer | null {
-    // 최소 프레임 길이: Preamble(1) + Start(2) + Len(1) + LCS(1) + TFI(1) + DCS(1) + Post(1) = 8
+    // 최소 프레임 길이: 8
     if (this.buffer.length < 8) return null;
 
-    // 1. 프레임 헤더 (00 00 FF) 찾기
-    // 버퍼 전체를 훑어서 00 00 FF 패턴이 있는지 확인
     let offset = 0;
     let frameFound = false;
     
@@ -296,26 +312,19 @@ export class PN532Service {
     }
 
     if (!frameFound) {
-      // 헤더를 못 찾았으면, 버퍼의 마지막 2바이트만 남기고 앞부분은 버려도 됨
-      // (다음 청크와 연결되어 00 00 FF가 완성될 수 있으므로 끝부분은 보존)
       if (this.buffer.length > 2) {
         const keep = this.buffer.slice(this.buffer.length - 2);
-        // console.log(`[PN532-DEBUG] Discarding garbage: ${this.buffer.slice(0, this.buffer.length - 2).toString('hex')}`);
         this.buffer = keep;
       }
       return null;
     }
 
-    // 헤더 발견 (offset 위치)
-    // 쓰레기 데이터 제거 (헤더 앞부분)
     if (offset > 0) {
-      // console.log(`[PN532-DEBUG] Skipping garbage before header: ${this.buffer.slice(0, offset).toString('hex')}`);
       this.buffer = this.buffer.slice(offset);
       offset = 0;
     }
 
-    // 이제 buffer는 00 00 FF ... 로 시작
-    if (this.buffer.length < 5) return null; // 아직 Length 필드까지 안 옴
+    if (this.buffer.length < 5) return null;
 
     const length = this.buffer[3];
     const lengthChecksum = this.buffer[4];
@@ -323,20 +332,15 @@ export class PN532Service {
     // Length Checksum 검증
     if (((length + lengthChecksum) & 0xff) !== 0) {
       console.warn('[PN532] Frame Length Checksum error. Skipping invalid header.');
-      // 이 헤더는 가짜임. 00 00 FF ... 패턴이었지만 체크섬이 안 맞음.
-      // 헤더(3바이트)만 제거하고 다시 검색하도록 유도
       this.buffer = this.buffer.slice(3);
-      return this.extractResponseFrame(); // 재귀 호출로 다음 헤더 찾기
+      return this.extractResponseFrame();
     }
 
-    // 전체 프레임 길이 확인
-    // Header(5) + Data(Length) + DCS(1) + Post(1)
     const totalLength = 5 + length + 2;
     if (this.buffer.length < totalLength) {
-      return null; // 데이터가 아직 다 안 옴. 대기.
+      return null;
     }
 
-    // 데이터 추출 및 Checksum 검증
     const data = this.buffer.slice(5, 5 + length);
     const dataChecksum = this.buffer[5 + length];
     
@@ -344,25 +348,31 @@ export class PN532Service {
     
     if (calculatedChecksum !== dataChecksum) {
        console.warn('[PN532] Frame Data Checksum error.');
-       // 체크섬 오류면 이 프레임 버림
        this.buffer = this.buffer.slice(3);
        return this.extractResponseFrame();
     }
 
     // TFI 확인 (PN532 -> Host: 0xD5)
+    // 만약 Syntax Error(7F)인 경우, 데이터가 7F 하나만 옴.
+    // 7F는 TFI 위치에 오지 않고, 별도의 Error Frame 구조가 있음.
+    // 하지만 PN532는 보통 00 00 FF 01 FF 7F 81 00 (7F: Error Code) 형태로 보냄.
+    // length=1, data=7F 이면 Syntax Error.
+    
+    if (data[0] === 0x7F) {
+        // Syntax Error Frame: 00 00 FF 01 FF 7F 81 00
+        // data = [7F]
+        console.warn('[PN532] Syntax Error Frame detected');
+        this.buffer = this.buffer.slice(totalLength);
+        return Buffer.from([0x7F]); // 7F 리턴해서 상위에서 처리
+    }
+
     if (data[0] !== PN532Service.PN532_TO_HOST) {
        console.warn(`[PN532] Invalid TFI: ${data[0].toString(16)}`);
-       // TFI 안 맞으면 무시
        this.buffer = this.buffer.slice(totalLength);
        return this.extractResponseFrame();
     }
 
-    // 성공! 프레임 추출
-    // 버퍼에서 해당 프레임 제거
     this.buffer = this.buffer.slice(totalLength);
-    
-    // TFI(D5) 제외하고 리턴할지, 포함할지?
-    // 기존 로직은 TFI 제외하고 리턴했음.
     return data.slice(1);
   }
 
