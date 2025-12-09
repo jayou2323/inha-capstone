@@ -33,10 +33,9 @@ export class SessionManager {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + this.sessionTimeoutMs);
 
-    // 영수증 URL 생성 (간소화)
-    const receiptUrl =
-      request.receiptUrl ||
-      `${process.env.RECEIPT_BASE_URL || 'http://localhost:3000'}/receipt/${request.orderId}`;
+    // 영수증 URL 생성 - 테스트용 짧은 URL 사용
+    // const receiptUrl = request.receiptUrl || `http://abc.com/r/${request.orderId}`;
+    const receiptUrl = 'https://abc.com';
 
     const session: NfcSession = {
       sessionId,
@@ -142,7 +141,7 @@ export class SessionManager {
 
       // NDEF URL 레코드 생성
       const ndefMessage = NdefUrlRecord.encode(receiptUrl);
-      console.log(`[SessionManager] NDEF message created (${ndefMessage.length} bytes)`);
+      console.log(`[SessionManager] NDEF message created (${ndefMessage.length} bytes for URL: ${receiptUrl})`);
 
       // PN532를 타겟 모드로 초기화
       const initSuccess = await this.pn532.initAsTarget(ndefMessage, this.taggingTimeoutMs);
