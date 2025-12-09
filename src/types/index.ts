@@ -32,7 +32,18 @@ export interface Category {
 // NFC 관련 타입
 export interface NfcSession {
   sessionId: string;
-  status: "pending" | "ready" | "tagging" | "completed" | "expired" | "failed";
+  status:
+    | "pending"
+    | "ready"
+    | "tagging"
+    | "scanned"
+    | "completed"
+    | "expired"
+    | "failed";
   expiresAt: string;
+  orderId?: string;
+  receiptUrl?: string;
+  scannedAt?: string;
+  updatedAt?: string;
   message?: string;
 }

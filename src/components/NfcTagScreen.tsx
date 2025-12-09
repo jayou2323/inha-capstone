@@ -2,12 +2,11 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Smartphone } from "lucide-react";
 import {
-  TIMINGS,
   NFC_ANIMATIONS,
   NFC_TRANSITIONS,
   ANIMATION_VARIANTS,
 } from "../constants/animations";
-import { createNfcSession } from "../lib/api";
+import { createNfcSession, getNfcSessionStatus } from "../lib/api";
 
 interface NfcTagScreenProps {
   receiptUrl: string;
@@ -24,6 +23,7 @@ export default function NfcTagScreen({
 }: NfcTagScreenProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("pending");
+  const POLL_INTERVAL_MS = 1500;
 
   // 1. NFC 세션 생성
   useEffect(() => {
@@ -37,12 +37,39 @@ export default function NfcTagScreen({
     initSession();
   }, [receiptUrl, onTagFailed]);
 
-  // 2. 상태 완료 처리 (Lambda 흐름에서는 바로 완료)
+  // 2. 상태 폴링으로 완료 감지
   useEffect(() => {
     if (!sessionId) return;
-    setStatus("completed");
-    onTagComplete();
-  }, [sessionId, onTagComplete]);
+    let timer: number | undefined;
+    let stopped = false;
+
+    const pollStatus = async () => {
+      try {
+        const res = await getNfcSessionStatus(sessionId);
+        if (!res) return;
+        setStatus(res.status);
+
+        if (res.status === "scanned" || res.status === "completed") {
+          stopped = true;
+          onTagComplete();
+        }
+      } catch (error) {
+        console.error("[NFC] 폴링 중 오류:", error);
+        onTagFailed?.("NFC 상태 확인 중 오류가 발생했습니다.");
+      } finally {
+        if (!stopped) {
+          timer = window.setTimeout(pollStatus, POLL_INTERVAL_MS);
+        }
+      }
+    };
+
+    pollStatus();
+
+    return () => {
+      stopped = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [sessionId, onTagComplete, onTagFailed]);
 
   // 3. 상태별 메시지
   const getStatusMessage = () => {
@@ -53,6 +80,9 @@ export default function NfcTagScreen({
         return "휴대폰을 태그해 주세요";
       case "tagging":
         return "데이터 전송 중...";
+      case "scanned":
+      case "completed":
+        return "전송이 완료되었습니다";
       default:
         return "휴대폰을 태그해 주세요";
     }
