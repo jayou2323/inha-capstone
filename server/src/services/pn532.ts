@@ -17,11 +17,14 @@ export class PN532Service {
   private static readonly CMD_TG_GET_DATA = 0x86;
   private static readonly CMD_TG_SET_DATA = 0x8e;
 
-  // PN532 프레임 구조
+  // PN532 프레임 상수
   private static readonly PREAMBLE = 0x00;
   private static readonly START_CODE1 = 0x00;
   private static readonly START_CODE2 = 0xff;
   private static readonly POSTAMBLE = 0x00;
+  private static readonly HOST_TO_PN532 = 0xd4;
+  private static readonly PN532_TO_HOST = 0xd5;
+  private static readonly ACK_FRAME = Buffer.from([0x00, 0x00, 0xff, 0x00, 0xff, 0x00]);
 
   constructor(config: PN532Config) {
     this.config = config;
@@ -37,7 +40,10 @@ export class PN532Service {
       // I2C 버스 오픈
       this.i2cBus = openSync(this.config.i2cBus);
 
-      // 펌웨어 버전 확인
+      // Wakeup 시퀀스 (선택적): 더미 데이터 전송으로 슬립 해제 시도
+      // 일부 모듈은 필요할 수 있음. 여기서는 리셋 커맨드를 보내는 대신 펌웨어 버전 확인으로 대체.
+      
+      // 펌웨어 버전 확인 (통신 테스트)
       const version = await this.getFirmwareVersion();
       if (!version) {
         throw new Error('Failed to get firmware version');
@@ -91,7 +97,8 @@ export class PN532Service {
     try {
       // Mode: 0x01 (Normal mode)
       // Timeout: 0x14 (20 * 50ms = 1 second)
-      // IRQ: 0x01 (Use IRQ pin)
+      // IRQ: 0x01 (Use IRQ pin - but we use polling via I2C)
+      // 실제로는 I2C 폴링을 하므로 IRQ 핀을 안 쓸 수도 있지만, 일반적인 설정값 사용
       const response = await this.sendCommand(
         Buffer.from([PN532Service.CMD_SAM_CONFIGURATION, 0x01, 0x14, 0x01]),
         this.config.readyTimeoutMs
@@ -117,29 +124,11 @@ export class PN532Service {
 
       // TgInitAsTarget 파라미터
       const mode = 0x00; // PICC only
-
-      // SENS_RES (ATQA)
-      const sensRes = Buffer.from([0x04, 0x00]);
-
-      // NFCID1t (UID) - 4바이트 UID
-      const nfcid1t = Buffer.from([0x12, 0x34, 0x56, 0x78]);
-
-      // SEL_RES (SAK)
-      const selRes = 0x20; // ISO/IEC 14443-4 compliant
-
-      // Parameters for Felica (not used, set to 0)
+      const sensRes = Buffer.from([0x04, 0x00]); // SENS_RES (ATQA)
+      const nfcid1t = Buffer.from([0x12, 0x34, 0x56, 0x78]); // NFCID1t (UID)
+      const selRes = 0x20; // SEL_RES (SAK)
       const felicaParams = Buffer.alloc(18, 0);
-
-      // NFCID3t (10 bytes, not used for Type 4)
       const nfcid3t = Buffer.alloc(10, 0);
-
-      // General bytes (NDEF message)
-      const generalBytes = ndefMessage;
-      const generalBytesLength = generalBytes.length;
-
-      // Historical bytes (empty)
-      const historicalBytes = Buffer.alloc(0);
-      const historicalBytesLength = 0;
 
       // 명령 생성
       const command = Buffer.concat([
@@ -149,10 +138,10 @@ export class PN532Service {
         Buffer.from([selRes]),
         felicaParams,
         nfcid3t,
-        Buffer.from([generalBytesLength]),
-        generalBytes,
-        Buffer.from([historicalBytesLength]),
-        historicalBytes,
+        Buffer.from([ndefMessage.length]),
+        ndefMessage,
+        Buffer.from([0]), // Historical bytes length
+        Buffer.alloc(0),  // Historical bytes
       ]);
 
       const response = await this.sendCommand(command, this.config.readyTimeoutMs);
@@ -171,60 +160,65 @@ export class PN532Service {
   }
 
   /**
-   * 태깅 이벤트 대기
+   * 태깅 이벤트 대기 (Polling)
    */
   async waitForTag(timeoutMs: number): Promise<boolean> {
     try {
       console.log(`[PN532] Waiting for tag (timeout: ${timeoutMs}ms)...`);
-
       const startTime = Date.now();
 
       while (Date.now() - startTime < timeoutMs) {
-        // TgGetData로 데이터 수신 대기
+        // TgGetData로 데이터 수신 대기 (상태 확인)
+        // 주의: TgInitAsTarget이 성공하면 이미 타겟 모드에 진입한 상태일 수 있음
+        // 여기서는 예시로 TgGetData를 보내지만, 실제로는 인터럽트나 상태 체크가 필요할 수 있음
+        
+        // 간단한 구현을 위해 TgGetData 시도
         const response = await this.sendCommand(
           Buffer.from([PN532Service.CMD_TG_GET_DATA]),
           1000
         );
 
-        if (response && response.length > 0) {
-          console.log('[PN532] Tag detected and data exchanged');
-          return true;
+        if (response && response.length > 0 && response[0] === 0x00) { // Status OK
+           console.log('[PN532] Tag detected and data exchanged');
+           return true;
         }
 
-        // 100ms 대기
-        await this.delay(100);
+        await this.delay(200);
       }
 
       console.log('[PN532] Tag timeout');
       return false;
     } catch (error) {
-      console.error('[PN532] Wait for tag failed:', error);
+      // 타임아웃이나 에러 발생 시
       return false;
     }
   }
 
   /**
-   * I2C를 통해 PN532에 명령 전송
+   * 명령 전송 및 응답 수신 (ACK 처리 포함)
    */
   private async sendCommand(
     command: Buffer,
     timeoutMs: number = 1000
   ): Promise<Buffer | null> {
-    if (!this.i2cBus) {
-      throw new Error('I2C bus not opened');
-    }
+    if (!this.i2cBus) throw new Error('I2C bus not opened');
 
     try {
-      // 프레임 생성
+      // 1. 프레임 전송
       const frame = this.buildFrame(command);
-
-      // I2C로 프레임 전송
       await this.i2cWrite(frame);
 
-      // 응답 대기 및 읽기
-      const response = await this.waitForResponse(timeoutMs);
+      // 2. ACK 대기
+      const ack = await this.waitForAck(100); // ACK는 보통 금방 옴
+      if (!ack) {
+        console.warn('[PN532] No ACK received');
+        return null;
+      }
 
+      // 3. 실제 응답 대기
+      const response = await this.waitForResponse(timeoutMs);
       return response;
+
     } catch (error) {
       console.error('[PN532] Send command error:', error);
       return null;
@@ -232,13 +226,74 @@ export class PN532Service {
   }
 
   /**
+   * ACK 프레임 대기
+   */
+  private async waitForAck(timeoutMs: number): Promise<boolean> {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      if (await this.isReady()) {
+        const data = await this.readData();
+        if (data && this.isAckFrame(data)) {
+          return true;
+        }
+      }
+      await this.delay(10);
+    }
+    return false;
+  }
+
+  /**
+   * 응답 데이터 대기
+   */
+  private async waitForResponse(timeoutMs: number): Promise<Buffer | null> {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      if (await this.isReady()) {
+        const data = await this.readData();
+        if (data && !this.isAckFrame(data)) {
+          // 응답 프레임 파싱
+          return this.parseFrame(data);
+        }
+      }
+      await this.delay(10);
+    }
+    return null;
+  }
+
+  /**
+   * I2C Read (Raw Data)
+   * PN532는 읽기 시 첫 바이트에 Status Byte를 붙여서 보냄
+   */
+  private async readData(): Promise<Buffer | null> {
+    if (!this.i2cBus) return null;
+
+    return new Promise((resolve) => {
+      // 넉넉하게 읽음 (최대 255바이트)
+      const buffer = Buffer.alloc(255);
+      this.i2cBus!.i2cRead(this.config.i2cAddress, buffer.length, buffer, (err, bytesRead, resBuf) => {
+        if (err || bytesRead === 0) {
+          resolve(null);
+        } else {
+          // 유효한 데이터만 잘라서 반환
+          resolve(resBuf.slice(0, bytesRead));
+        }
+      });
+    });
+  }
+
+  /**
    * PN532 프레임 생성
    */
   private buildFrame(data: Buffer): Buffer {
-    const length = data.length;
-    const lengthChecksum = (~length + 1) & 0xff;
+    const frameData = Buffer.concat([
+      Buffer.from([PN532Service.HOST_TO_PN532]), // TFI (Host to PN532)
+      data
+    ]);
 
-    const dataChecksum = (~data.reduce((sum, byte) => sum + byte, 0) + 1) & 0xff;
+    const length = frameData.length;
+    const lengthChecksum = (~length + 1) & 0xff;
+    
+    const dataChecksum = (~frameData.reduce((sum, byte) => sum + byte, 0) + 1) & 0xff;
 
     return Buffer.concat([
       Buffer.from([
@@ -248,164 +303,104 @@ export class PN532Service {
         length,
         lengthChecksum,
       ]),
-      data,
+      frameData,
       Buffer.from([dataChecksum, PN532Service.POSTAMBLE]),
     ]);
   }
 
   /**
-   * I2C 쓰기
+   * 프레임 파싱
    */
-  private async i2cWrite(data: Buffer): Promise<void> {
-    if (!this.i2cBus) {
-      throw new Error('I2C bus not opened');
-    }
-
-    return new Promise((resolve, reject) => {
-      this.i2cBus!.i2cWrite(this.config.i2cAddress, data.length, data, (error) => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve();
+  private parseFrame(buffer: Buffer): Buffer | null {
+    // 1. Preamble (0x00) 찾기 (I2C Status Byte 때문에 오프셋이 있을 수 있음)
+    let offset = 0;
+    while (offset < buffer.length - 1) {
+      if (buffer[offset] === 0x00 && buffer[offset + 1] === 0xff) {
+        // Start Code 0x00 0xFF를 찾음 (Preamble은 그 앞)
+        // 표준 프레임: [00] 00 FF ...
+        if (offset > 0 && buffer[offset-1] === 0x00) {
+          offset--; // Preamble 위치로
+          break;
         }
-      });
-    });
-  }
-
-  /**
-   * 응답 대기 및 읽기
-   */
-  private async waitForResponse(timeoutMs: number): Promise<Buffer | null> {
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < timeoutMs) {
-      try {
-        const ready = await this.isReady();
-
-        if (ready) {
-          return await this.i2cRead();
-        }
-
-        await this.delay(10);
-      } catch (error) {
-        console.error('[PN532] Wait for response error:', error);
-        return null;
       }
+      offset++;
     }
 
-    console.warn('[PN532] Response timeout');
-    return null;
+    if (offset >= buffer.length - 5) return null; // 너무 짧음
+
+    const frame = buffer.slice(offset);
+
+    // 기본 검증
+    if (frame[0] !== PN532Service.PREAMBLE || 
+        frame[1] !== PN532Service.START_CODE1 || 
+        frame[2] !== PN532Service.START_CODE2) {
+      return null;
+    }
+
+    const length = frame[3];
+    const lengthChecksum = frame[4];
+
+    if (((length + lengthChecksum) & 0xff) !== 0) {
+      console.error('[PN532] Length checksum error');
+      return null;
+    }
+
+    // TFI + Data
+    const data = frame.slice(5, 5 + length);
+    const dataChecksum = frame[5 + length];
+
+    const calculatedChecksum = (~data.reduce((sum, byte) => sum + byte, 0) + 1) & 0xff;
+    if (calculatedChecksum !== dataChecksum) {
+       console.error('[PN532] Data checksum error');
+       return null;
+    }
+
+    // TFI 확인 (PN532 -> Host)
+    if (data[0] !== PN532Service.PN532_TO_HOST) {
+       // 에러 프레임일 수도 있음
+       return null;
+    }
+
+    // 실제 데이터 반환 (TFI 제외)
+    return data.slice(1);
+  }
+
+  private isAckFrame(buffer: Buffer): boolean {
+    // ACK: 00 00 FF 00 FF 00
+    // 버퍼 안에 ACK 시퀀스가 있는지 확인
+    const hex = buffer.toString('hex');
+    return hex.includes('0000ff00ff00');
   }
 
   /**
-   * PN532가 응답 준비되었는지 확인
+   * Ready 상태 확인 (Status Byte 읽기)
    */
   private async isReady(): Promise<boolean> {
-    if (!this.i2cBus) {
-      return false;
-    }
+    if (!this.i2cBus) return false;
 
     return new Promise((resolve) => {
       const buffer = Buffer.alloc(1);
-      this.i2cBus!.i2cRead(this.config.i2cAddress, 1, buffer, (error) => {
-        if (error) {
-          resolve(false);
-        } else {
-          // Ready 상태: 0x01
-          resolve((buffer[0] & 0x01) === 0x01);
-        }
+      this.i2cBus!.i2cRead(this.config.i2cAddress, 1, buffer, (err) => {
+        if (err) resolve(false);
+        else resolve((buffer[0] & 0x01) === 0x01);
       });
     });
   }
 
-  /**
-   * I2C 읽기
-   */
-  private async i2cRead(): Promise<Buffer | null> {
-    if (!this.i2cBus) {
-      return null;
-    }
-
-    return new Promise((resolve) => {
-      const buffer = Buffer.alloc(64);
-      this.i2cBus!.i2cRead(
-        this.config.i2cAddress,
-        buffer.length,
-        buffer,
-        (error: Error | null, bytesRead: number, resultBuffer: Buffer) => {
-          if (error || bytesRead === 0) {
-            resolve(null);
-          } else {
-            // 프레임 파싱
-            const data = this.parseFrame(resultBuffer.slice(0, bytesRead));
-            resolve(data);
-          }
-        }
-      );
+  private async i2cWrite(data: Buffer): Promise<void> {
+    if (!this.i2cBus) throw new Error('I2C bus not opened');
+    return new Promise((resolve, reject) => {
+      this.i2cBus!.i2cWrite(this.config.i2cAddress, data.length, data, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
     });
   }
 
-  /**
-   * 프레임 파싱
-   */
-  private parseFrame(frame: Buffer): Buffer | null {
-    try {
-      // 최소 프레임 크기 확인
-      if (frame.length < 7) {
-        return null;
-      }
-
-      // Preamble, Start Code 확인
-      if (
-        frame[0] !== PN532Service.PREAMBLE ||
-        frame[1] !== PN532Service.START_CODE1 ||
-        frame[2] !== PN532Service.START_CODE2
-      ) {
-        return null;
-      }
-
-      const length = frame[3];
-      const lengthChecksum = frame[4];
-
-      // Length checksum 확인
-      if (((length + lengthChecksum) & 0xff) !== 0) {
-        return null;
-      }
-
-      // 데이터 추출
-      const data = frame.slice(5, 5 + length);
-      const dataChecksum = frame[5 + length];
-
-      // Data checksum 확인
-      const calculatedChecksum =
-        (~data.reduce((sum, byte) => sum + byte, 0) + 1) & 0xff;
-      if (calculatedChecksum !== dataChecksum) {
-        return null;
-      }
-
-      // ACK 프레임인 경우
-      if (data[0] === 0x00 && data[1] === 0xff) {
-        return Buffer.alloc(0);
-      }
-
-      // 응답 데이터 반환 (명령 코드 제외)
-      return data.slice(1);
-    } catch (error) {
-      console.error('[PN532] Parse frame error:', error);
-      return null;
-    }
-  }
-
-  /**
-   * 지연
-   */
   private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  /**
-   * 리소스 정리
-   */
   close(): void {
     try {
       if (this.i2cBus) {
@@ -419,9 +414,6 @@ export class PN532Service {
     }
   }
 
-  /**
-   * 재초기화
-   */
   async reinitialize(): Promise<boolean> {
     console.log('[PN532] Reinitializing...');
     this.close();
