@@ -140,15 +140,9 @@ export class SessionManager {
       this.updateSessionStatus(sessionId, 'ready');
       console.log(`[SessionManager] Session ready: ${sessionId}`);
 
-      // NDEF URL 레코드 생성 (테스트를 위해 짧은 메시지 사용)
-      // DEBUG: 짧은 메시지로 먼저 테스트
-      // const ndefMessage = NdefUrlRecord.encode(receiptUrl);
-      
-      // 임시: 아주 짧은 NDEF (테스트용) - URI Record "http://test.com"
-      const ndefMessage = Buffer.from([
-        0xD1, 0x01, 0x0B, 0x55, 0x03, 0x74, 0x65, 0x73, 0x74, 0x2E, 0x63, 0x6F, 0x6D, 0x2F, 0x31
-      ]);
-      console.log(`[SessionManager] NDEF message created (${ndefMessage.length} bytes - DEBUG SHORT MSG)`);
+      // NDEF URL 레코드 생성
+      const ndefMessage = NdefUrlRecord.encode(receiptUrl);
+      console.log(`[SessionManager] NDEF message created (${ndefMessage.length} bytes)`);
 
       // PN532를 타겟 모드로 초기화
       const initSuccess = await this.pn532.initAsTarget(ndefMessage, this.taggingTimeoutMs);
